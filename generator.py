@@ -1,4 +1,4 @@
-import openai
+from openai import OpenAI
 import streamlit as st
 import json
 import pandas as pd
@@ -45,7 +45,8 @@ st.header("5. Anden vigtig information")
 additional_info = st.text_area("Skriv evt. yderligere info, som ikke står i Xpect")
 
 # OpenAI API key input in sidebar
-openai.api_key = st.sidebar.text_input("Indtast din OpenAI API-nøgle", type="password")
+api_key = st.sidebar.text_input("Indtast din OpenAI API-nøgle", type="password")
+# client is created later right before the API call to allow the user to change the key in the sidebar
 
 # Optional: model selection in sidebar
 model_choice = st.sidebar.selectbox("Vælg model", options=["gpt-4o", "gpt-4o-mini"], index=0)
@@ -163,7 +164,12 @@ Brug website-indholdet som ekstra inspiration til kampagnestrukturen og annoncet
     """
 
         try:
-            response = openai.ChatCompletion.create(
+            if not api_key:
+                st.error("Indtast din OpenAI API-nøgle i sidebaren for at køre AI-analysen.")
+                raise RuntimeError("Missing API key")
+
+            client = OpenAI(api_key=api_key)
+            response = client.chat.completions.create(
                 model=model_choice,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -172,7 +178,8 @@ Brug website-indholdet som ekstra inspiration til kampagnestrukturen og annoncet
                 max_tokens=4000,
                 temperature=0.8
             )
-            output_text = response.choices[0].message["content"]
+            # New SDK: get content from the first choice
+            output_text = response.choices[0].message.content
 
             try:
                 data = extract_json_from_text(output_text)
