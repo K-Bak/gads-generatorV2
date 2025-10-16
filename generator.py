@@ -272,24 +272,29 @@ Tilføj altid kampagneudvidelser i outputtet: 4 undersidelinks ("sitelinks"), 3-
                         ad = ads[0] if ads else {}
 
                         # Prepare ad fields with truncation and formatting
-                        def trunc(text, length, min_length=25):
+                        def trunc(text, length):
                             if not text:
                                 return ""
                             text = text.strip()
-                            if len(text) > length:
-                                return text[:length]
-                            if len(text) < min_length:
-                                # Fyld op med punktummer for at få minimumslængde
-                                return text + "." * (min_length - len(text))
-                            return text
+                            return text[:length] if len(text) > length else text
 
                         def format_headline_case(text):
                             if not text:
                                 return ""
-                            return text.strip()
+                            text = text.strip()
+                            words = text.split()
+                            formatted = [words[0].capitalize()] if words else []
+                            for word in words[1:]:
+                                if word.lower() in ["i", "og", "eller", "for", "med", "på", "til", "af", "om", "fra", "ved", "uden"]:
+                                    formatted.append(word.lower())
+                                elif word[0].isupper() and word[1:].islower():
+                                    formatted.append(word)  # Behold hvis det allerede er et navn/stednavn
+                                else:
+                                    formatted.append(word.lower())
+                            return " ".join(formatted)
 
-                        ad_headlines = [format_headline_case(trunc(ad.get(f"headline_{i}", ""), 30, 25)) for i in range(1,10)]
-                        ad_descriptions = [format_headline_case(trunc(ad.get(f"description_{i}", ""), 90, 60)) for i in range(1,5)]
+                        ad_headlines = [format_headline_case(trunc(ad.get(f"headline_{i}", ""), 30)) for i in range(1,10)]
+                        ad_descriptions = [format_headline_case(trunc(ad.get(f"description_{i}", ""), 90)) for i in range(1,5)]
                         final_url = ad.get("final_url", customer_website or "")
 
                         # Add ad data row
