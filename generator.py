@@ -283,12 +283,15 @@ Tilføj altid kampagneudvidelser i outputtet: 4 undersidelinks ("sitelinks"), 3-
                                 return ""
                             text = text.strip()
                             words = text.split()
-                            formatted = [words[0].capitalize()] if words else []
-                            for word in words[1:]:
-                                if word.lower() in ["i", "og", "eller", "for", "med", "på", "til", "af", "om", "fra", "ved", "uden"]:
+                            formatted = []
+                            for i, word in enumerate(words):
+                                # Always capitalize first word
+                                if i == 0:
+                                    formatted.append(word.capitalize())
+                                elif word.lower() in ["i", "og", "eller", "for", "med", "på", "til", "af", "om", "fra", "ved", "uden"]:
                                     formatted.append(word.lower())
-                                elif word[0].isupper() and word[1:].islower():
-                                    formatted.append(word)  # Behold hvis det allerede er et navn/stednavn
+                                elif word.istitle():  # Preserve existing proper nouns (fx navne, brands, byer)
+                                    formatted.append(word)
                                 else:
                                     formatted.append(word.lower())
                             return " ".join(formatted)
