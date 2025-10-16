@@ -1,4 +1,4 @@
-import openai
+from openai import OpenAI
 import streamlit as st
 import json
 import pandas as pd
@@ -231,9 +231,9 @@ Tilføj altid kampagneudvidelser i outputtet: 4 undersidelinks ("sitelinks"), 3-
             if not api_key:
                 st.error("Indtast din OpenAI API-nøgle i sidebaren for at køre AI-analysen.")
                 raise RuntimeError("Missing API key")
-
-            openai.api_key = api_key
-            response = openai.ChatCompletion.create(
+            
+            client = OpenAI(api_key=api_key)
+            response = client.chat.completions.create(
                 model=model_choice,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -242,7 +242,6 @@ Tilføj altid kampagneudvidelser i outputtet: 4 undersidelinks ("sitelinks"), 3-
                 max_tokens=4000,
                 temperature=0.8
             )
-            # New SDK: get content from the first choice
             output_text = response.choices[0].message.content
 
             try:
