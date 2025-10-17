@@ -1,4 +1,4 @@
-from openai import OpenAI
+import openai
 import streamlit as st
 import json
 import pandas as pd
@@ -232,8 +232,8 @@ Tilføj altid kampagneudvidelser i outputtet: 4 undersidelinks ("sitelinks"), 3-
                 st.error("Indtast din OpenAI API-nøgle i sidebaren for at køre AI-analysen.")
                 raise RuntimeError("Missing API key")
             
-            client = OpenAI(api_key=api_key)
-            response = client.chat.completions.create(
+            openai.api_key = api_key
+            response = openai.ChatCompletion.create(
                 model=model_choice,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -242,7 +242,7 @@ Tilføj altid kampagneudvidelser i outputtet: 4 undersidelinks ("sitelinks"), 3-
                 max_tokens=4000,
                 temperature=0.8
             )
-            output_text = response.choices[0].message.content
+            output_text = response.choices[0].message["content"]
 
             try:
                 data = extract_json_from_text(output_text)
@@ -282,21 +282,26 @@ Tilføj altid kampagneudvidelser i outputtet: 4 undersidelinks ("sitelinks"), 3-
                             if not text:
                                 return ""
                             text = text.strip()
+
+                            # Listen over tilladte ord med stort bogstav (navne, steder, brands – kan udvides)
+                            proper_nouns = {"Google", "Microsoft", "Danmark", "København", "Aarhus"}
+
                             words = text.split()
                             formatted = []
+
                             for i, word in enumerate(words):
-                                # Always capitalize first word
+                                word_clean = re.sub(r"\W", "", word)  # fjern skilletegn for sammenligning
                                 if i == 0:
                                     formatted.append(word.capitalize())
-                                elif word.lower() in ["i", "og", "eller", "for", "med", "på", "til", "af", "om", "fra", "ved", "uden"]:
-                                    formatted.append(word.lower())
-                                elif word.istitle():  # Preserve existing proper nouns (fx navne, brands, byer)
+                                elif word_clean in proper_nouns:
                                     formatted.append(word)
                                 else:
                                     formatted.append(word.lower())
-                            return " ".join(formatted)
 
-                        ad_headlines = [format_headline_case(trunc(ad.get(f"headline_{i}", ""), 30)) for i in range(1,10)]
+                            result = " ".join(formatted)
+                            return result[:30]  # Maks 30 tegn
+
+                        ad_headlines = [format_headline_case(ad.get(f"headline_{i}", "")) for i in range(1, 10)]
                         ad_descriptions = [format_headline_case(trunc(ad.get(f"description_{i}", ""), 90)) for i in range(1,5)]
                         final_url = ad.get("final_url", customer_website or "")
 
