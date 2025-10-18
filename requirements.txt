@@ -1,6 +1,6 @@
 streamlit
-openai
 beautifulsoup4
-pandas
 requests
+pandas
 google-ads
+openai==0.28
