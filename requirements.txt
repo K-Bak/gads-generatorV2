@@ -3,4 +3,4 @@ beautifulsoup4
 requests
 pandas
 google-ads
-openai==0.28
+openai>=1.0.0,<2.0.0
