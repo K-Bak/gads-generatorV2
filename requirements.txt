@@ -1,7 +1,20 @@
+# Streamlit app & UI
 streamlit
-beautifulsoup4
-requests
 pandas
+requests
+beautifulsoup4
+lxml
+tldextract
+
+# Google Ads & API
 google-ads
+
+# AI integration
 openai>=1.0.0,<2.0.0
+
+# Filhåndtering
 python-docx
+openpyxl
+
+# Ekstra analyser og værktøjer
+regex
