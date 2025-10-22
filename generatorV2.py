@@ -203,18 +203,6 @@ additional_info = st.text_area("Skriv evt. yderligere info, som ikke står i Xpe
 
 api_key = st.sidebar.text_input("Indtast din OpenAI API-nøgle", type="password")
 
-# --- Test GPT-5 forbindelse felt i sidebar ---
-if st.sidebar.button("Test GPT-5 forbindelse"):
-    try:
-        client = OpenAI(api_key=api_key)
-        resp = client.chat.completions.create(
-            model="gpt-5",
-            messages=[{"role": "user", "content": "Skriv 'hej verden'"}]
-        )
-        st.success(resp.choices[0].message.content)
-    except Exception as e:
-        st.error(f"Fejl: {e}")
-
 # model selection
 model_choice = st.sidebar.selectbox("Vælg model", options=["gpt-5"], index=0)
 
@@ -295,19 +283,15 @@ Geografiske områder:
 Samlet dagsbudget:
 {total_daily_budget} kr.
 """
-        # --- Indsæt status før GPT-5 kald ---
-        st.write("⏳ Sender forespørgsel til GPT-5...")
-        st.write(f"Model: {model_choice}")
-        st.write(f"Xpect længde: {len(xpect_text)} tegn")
-        st.write(f"Scraped info længde: {len(scraped_info)} tegn")
-
-        response = client.chat.completions.create(
-            model="gpt-5",
-            messages=[
-                {"role": "system", "content": "Du er en erfaren Google Ads strateg, der laver foranalyse og konkurrentanalyse før kampagnestruktur."},
-                {"role": "user", "content": combined_analysis_prompt}
-            ]
-        )
+        # --- Indsæt spinner omkring GPT-5 kald ---
+        with st.spinner("🔍 Analyserer data med GPT‑5..."):
+            response = client.chat.completions.create(
+                model="gpt-5",
+                messages=[
+                    {"role": "system", "content": "Du er en erfaren Google Ads strateg, der laver foranalyse og konkurrentanalyse før kampagnestruktur."},
+                    {"role": "user", "content": combined_analysis_prompt}
+                ]
+            )
         st.write("✅ Modtog svar fra GPT-5")
         output = response.choices[0].message.content
         try:
@@ -534,14 +518,6 @@ if st.button("Gem og fortsæt"):
         st.info("⚠️ Du har ændret input siden sidste analyse. Overvej at køre analyserne igen for bedst resultat.")
     if not st.session_state.get("analyses_ready"):
         st.warning("Tip: Kør analyser først for skarpere output (jeg kan godt fortsætte uden, men kvaliteten bliver bedre med analyserne).")
-    with st.expander("🔧 Debug – status for analyser"):
-        st.write({
-            "analyses_ready": st.session_state.get("analyses_ready"),
-            "analysis_len": len(st.session_state.get("analysis_text", "")),
-            "competitor_analysis_len": len(st.session_state.get("competitor_analysis_text", "")),
-            "analysis_hash": st.session_state.get("analysis_hash"),
-            "current_hash": current_hash,
-        })
     input_data = {
         "xpect": xpect_text,
         "website": customer_website,
