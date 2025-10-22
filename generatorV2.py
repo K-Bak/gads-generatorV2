@@ -1,4 +1,5 @@
 import openai
+from openai import OpenAI
 import streamlit as st
 import json
 import pandas as pd
@@ -74,7 +75,22 @@ st.title("Google Ads – Kampagne Generator")
 
 st.header("1. Indsæt Xpect")
 
-xpect_text = st.text_area("Kopier hele Xpect-teksten her")
+# Mulighed for både upload og indsæt Xpect
+uploaded_xpect = st.file_uploader("Upload Xpect (PDF, TXT eller DOCX)", type=["pdf", "txt", "docx"])
+if uploaded_xpect is not None:
+    if uploaded_xpect.type == "application/pdf":
+        import PyPDF2
+        reader = PyPDF2.PdfReader(uploaded_xpect)
+        xpect_text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    elif uploaded_xpect.type in ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/msword"]:
+        from docx import Document
+        doc = Document(uploaded_xpect)
+        xpect_text = "\n".join([p.text for p in doc.paragraphs])
+    else:
+        xpect_text = uploaded_xpect.read().decode("utf-8", errors="ignore")
+    st.success("✅ Xpect-fil uploadet")
+else:
+    xpect_text = st.text_area("Kopier hele Xpect-teksten her")
 
 # --- Geografisk områdeudtræk fra Xpect ---
 def extract_cities_from_xpect(xpect_text):
@@ -125,28 +141,49 @@ def get_internal_links(base_url, soup):
     return list(links)
 
 scraped_info = ""
+# Website scraping med filtrering af relevante tags og stopord
+RELEVANT_TAGS = {"h1", "h2", "h3", "title"}
+STOPWORDS = {
+    "forside", "om", "kontakt", "historien", "nyheder", "bliv forhandler",
+    "om os", "kontakt os", "om vibegaard"
+}
+
+def clean_scraped_texts(texts):
+    cleaned = []
+    seen = set()
+    for t in texts:
+        t_clean = re.sub(r'\s+', ' ', t.strip())
+        if len(t_clean) < 4:
+            continue
+        if any(sw.lower() in t_clean.lower() for sw in STOPWORDS):
+            continue
+        if t_clean.lower() in seen:
+            continue
+        seen.add(t_clean.lower())
+        cleaned.append(t_clean)
+    return cleaned
+
 if customer_website:
     try:
         response = requests.get(customer_website, timeout=5)
         soup = BeautifulSoup(response.text, "html.parser")
 
         all_links = get_internal_links(customer_website, soup)
-        pages_to_scrape = [customer_website] + all_links[:4]  # i alt 5 sider inkl. forsiden
+        pages_to_scrape = [customer_website] + all_links[:4]
 
-        all_headings_links = []
-
+        all_texts = []
         for url in pages_to_scrape:
             try:
                 res = requests.get(url, timeout=5)
                 sub_soup = BeautifulSoup(res.text, "html.parser")
-                headings = [h.get_text(strip=True) for h in sub_soup.find_all(["h1", "h2", "h3"])]
-                links = [a.get_text(strip=True) for a in sub_soup.find_all("a") if a.get_text(strip=True)]
-                all_headings_links.extend(headings[:5] + links[:5])
+                headings = [h.get_text(strip=True) for h in sub_soup.find_all(RELEVANT_TAGS)]
+                all_texts.extend(headings)
             except Exception:
                 continue
 
-        scraped_info = "\n".join(all_headings_links[:50])
-        st.write("🔎 Website analyseret – fundet følgende indhold på flere sider:")
+        filtered = clean_scraped_texts(all_texts)
+        scraped_info = "\n".join(filtered[:50])
+        st.write("🔎 Website analyseret – fundet følgende relevante indhold:")
         st.code(scraped_info)
     except Exception as e:
         st.warning(f"Kunne ikke analysere website: {e}")
@@ -196,7 +233,7 @@ analysis_text = ""
 competitor_analysis_text = ""
 if run_all_analyses and api_key and customer_website and xpect_text:
     try:
-        openai.api_key = api_key
+        client = OpenAI(api_key=api_key)
         # Step 1: Foranalyse
         st.subheader("📊 Kører foranalyse ...")
         analysis_prompt = f"""Du er en marketingstrateg med speciale i Google Ads.
@@ -217,7 +254,7 @@ Website-indhold:
 
 Evt. noter:
 {additional_info}"""
-        analysis_response = openai.ChatCompletion.create(
+        analysis_response = client.chat.completions.create(
             model=model_choice,
             messages=[
                 {"role": "system", "content": "Du er en erfaren Google Ads strateg, der laver indledende analyse før kampagnestruktur."},
@@ -226,7 +263,7 @@ Evt. noter:
             max_tokens=1200,
             temperature=0.6
         )
-        analysis_text = analysis_response.choices[0].message["content"]
+        analysis_text = analysis_response.choices[0].message.content
         st.write(analysis_text)
 
         # Step 2: Konkurrentforslag (auto-suggest)
@@ -240,7 +277,7 @@ Website-uddrag:
 
 Xpect (kort):
 {xpect_text[:1200]}"""
-        suggest_response = openai.ChatCompletion.create(
+        suggest_response = client.chat.completions.create(
             model=model_choice,
             messages=[
                 {"role": "system", "content": "Du laver kort, præcis konkurrentliste (kun domæner, komma-separeret)."},
@@ -249,7 +286,7 @@ Xpect (kort):
             max_tokens=200,
             temperature=0.3
         )
-        suggestion_text = suggest_response.choices[0].message["content"]
+        suggestion_text = suggest_response.choices[0].message.content
         suggested = extract_domains(suggestion_text)
         if not suggested:
             suggested = get_external_domains_from_homepage(customer_website, max_domains=5)
@@ -272,7 +309,7 @@ Lever en kort dansk analyse der for hver dominerende konkurrent angiver:
 - Tone og stil
 - Gaps
 Afslut med 3–5 forslag til hvordan vi kan differentiere os."""
-        ca_response = openai.ChatCompletion.create(
+        ca_response = client.chat.completions.create(
             model=model_choice,
             messages=[
                 {"role": "system", "content": "Du er en erfaren Google Ads strateg, der laver konkurrentanalyse for at informere kampagneopbygning."},
@@ -281,7 +318,7 @@ Afslut med 3–5 forslag til hvordan vi kan differentiere os."""
             max_tokens=1200,
             temperature=0.6
         )
-        competitor_analysis_text = ca_response.choices[0].message["content"]
+        competitor_analysis_text = ca_response.choices[0].message.content
         st.write(competitor_analysis_text)
         st.session_state["analysis_text"] = analysis_text
         st.session_state["competitor_analysis_text"] = competitor_analysis_text
@@ -386,8 +423,8 @@ def headline_cleanup(texts, api_key, model_choice, max_len=30, label="overskrift
         return texts
     prompt = f"Omskriv disse {label} til hele, men korte danske sætninger. Maks {max_len} tegn, og sætningen skal give mening:\n" + "\n".join(bad)
     try:
-        openai.api_key = api_key
-        resp = openai.ChatCompletion.create(
+        client = OpenAI(api_key=api_key)
+        resp = client.chat.completions.create(
             model=model_choice,
             messages=[
                 {"role": "system", "content": "Du er en dansk tekstforfatter for Google Ads. Du skriver fængende, men korte sætninger."},
@@ -396,7 +433,7 @@ def headline_cleanup(texts, api_key, model_choice, max_len=30, label="overskrift
             max_tokens=400,
             temperature=0.6
         )
-        suggestions = [s.strip() for s in resp.choices[0].message["content"].split("\n") if s.strip()]
+        suggestions = [s.strip() for s in resp.choices[0].message.content.split("\n") if s.strip()]
         idx = 0
         for i, t in enumerate(texts):
             if t in bad and idx < len(suggestions):
@@ -567,9 +604,9 @@ Hvis budgettet er lavt, fordel det jævnt mellem områderne.
             if not api_key:
                 st.error("Indtast din OpenAI API-nøgle i sidebaren for at køre AI-analysen.")
                 raise RuntimeError("Missing API key")
-            
-            openai.api_key = api_key
-            response = openai.ChatCompletion.create(
+
+            client = OpenAI(api_key=api_key)
+            response = client.chat.completions.create(
                 model=model_choice,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -578,7 +615,7 @@ Hvis budgettet er lavt, fordel det jævnt mellem områderne.
                 max_tokens=4000,
                 temperature=0.4
             )
-            output_text = response.choices[0].message["content"]
+            output_text = response.choices[0].message.content
 
             try:
                 data = extract_json_from_text(output_text)
