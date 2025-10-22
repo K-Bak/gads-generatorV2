@@ -1,0 +1,8 @@
+# Ignore credentials and sensitive files
+google-ads.yaml
+client_secret_*.json
+oauth_flow.py
+.secrets.toml
+__pycache__/
+.env
+
