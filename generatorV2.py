@@ -148,15 +148,25 @@ STOPWORDS = {
     "om os", "kontakt os", "om vibegaard"
 }
 
-def clean_scraped_texts(texts):
+def clean_scraped_texts(texts, base_domain=None):
     cleaned = []
     seen = set()
+    noise_pattern = re.compile(
+        r"(?i)\b(nyhed|klik her|læs mere|kontakt|book|campaya|snak|faq|bestil|webshop|ring|tilmelding)\b"
+    )
+
     for t in texts:
         t_clean = re.sub(r'\s+', ' ', t.strip())
-        if len(t_clean) < 4:
+        if len(t_clean) < 15 or len(t_clean) > 120:
             continue
-        if any(sw.lower() in t_clean.lower() for sw in STOPWORDS):
+        if noise_pattern.search(t_clean):
             continue
+        if base_domain:
+            base = base_domain.split('.')[0]
+            if base in t_clean.lower():
+                continue
+        if "|" in t_clean:
+            t_clean = t_clean.split("|")[0].strip()
         if t_clean.lower() in seen:
             continue
         seen.add(t_clean.lower())
@@ -181,7 +191,7 @@ if customer_website:
             except Exception:
                 continue
 
-        filtered = clean_scraped_texts(all_texts)
+        filtered = clean_scraped_texts(all_texts, base_domain=urlparse(customer_website).netloc)
         scraped_info = "\n".join(filtered[:50])
         st.write("🔎 Website analyseret – fundet følgende relevante indhold:")
         st.code(scraped_info)
