@@ -201,14 +201,22 @@ selected_campaign_types = st.multiselect(
 st.header("5. Anden vigtig information")
 additional_info = st.text_area("Skriv evt. yderligere info, som ikke står i Xpect")
 
-# OpenAI API key input in sidebar
 api_key = st.sidebar.text_input("Indtast din OpenAI API-nøgle", type="password")
 
+# --- Test GPT-5 forbindelse felt i sidebar ---
+if st.sidebar.button("Test GPT-5 forbindelse"):
+    try:
+        client = OpenAI(api_key=api_key)
+        resp = client.chat.completions.create(
+            model="gpt-5",
+            messages=[{"role": "user", "content": "Skriv 'hej verden'"}]
+        )
+        st.success(resp.choices[0].message.content)
+    except Exception as e:
+        st.error(f"Fejl: {e}")
+
 # model selection
-
-
-
-model_choice = st.sidebar.selectbox("Vælg model", options=["gpt-4o", "gpt-4o-mini"], index=0)
+model_choice = st.sidebar.selectbox("Vælg model", options=["gpt-5"], index=0)
 
 # Google Ads – Customer ID (bruges til Keyword Planner)
 gads_customer_id = st.sidebar.text_input("Google Ads customer ID (uden bindestreger)", value="7445232535")
@@ -234,94 +242,98 @@ competitor_analysis_text = ""
 if run_all_analyses and api_key and customer_website and xpect_text:
     try:
         client = OpenAI(api_key=api_key)
-        # Step 1: Foranalyse
-        st.subheader("📊 Kører foranalyse ...")
-        analysis_prompt = f"""Du er en marketingstrateg med speciale i Google Ads.
-Baseret på nedenstående input (Xpect + websitet), skal du udlede:
-- Primære budskaber og value proposition
-- Målgruppe(r)
-- USP’er
-- Tone of voice
-- Call-to-actions
-- Potentielle annoncevinkler
-Skriv kort på dansk i punktform.
+        # Samlet analyse prompt (foranalyse, konkurrentforslag og konkurrentanalyse i ét kald)
+        combined_analysis_prompt = f"""Du er en erfaren Google Ads strateg.
+Baseret på nedenstående input (Xpect, website, website-indhold, ekstra noter, geografiske områder, ønskede kampagnetyper og budget), skal du udføre en samlet analyse bestående af:
 
+1. **Foranalyse**:
+   - Primære budskaber og value proposition
+   - Målgruppe(r)
+   - USP’er
+   - Tone of voice
+   - Call-to-actions
+   - Potentielle annoncevinkler
+   Skriv kort på dansk i punktform.
+
+2. **Konkurrentforslag**:
+   - Find de 2–5 vigtigste konkurrenter i Danmark for virksomheden ud fra Xpect og websitet.
+   - Returnér KUN en kommasepareret liste over roddomæner (uden http/https og uden understier).
+
+3. **Konkurrentanalyse**:
+   - For hver nævnt konkurrent: Skriv kort på dansk (punktform) om deres primære budskaber, USP’er, CTA’er, tone og stil, samt eventuelle gaps.
+   - Afslut med 3–5 forslag til hvordan virksomheden kan differentiere sig fra konkurrenterne.
+
+**Outputformat**:
+Returnér ét samlet JSON-objekt med følgende nøgler:
+{{
+  "foranalyse": "...",
+  "konkurrenter": "domæne1.dk, domæne2.dk, ...",
+  "konkurrentanalyse": "..."
+}}
+
+---
+
+**Input:**
 Xpect:
 {xpect_text}
+
+Website:
+{customer_website}
 
 Website-indhold:
 {scraped_info}
 
-Evt. noter:
-{additional_info}"""
-        analysis_response = client.chat.completions.create(
-            model=model_choice,
+Ekstra noter:
+{additional_info}
+
+Geografiske områder:
+{geo_areas}
+
+Ønskede kampagnetyper:
+{", ".join(selected_campaign_types)}
+
+Samlet dagsbudget:
+{total_daily_budget} kr.
+"""
+        # --- Indsæt status før GPT-5 kald ---
+        st.write("⏳ Sender forespørgsel til GPT-5...")
+        st.write(f"Model: {model_choice}")
+        st.write(f"Xpect længde: {len(xpect_text)} tegn")
+        st.write(f"Scraped info længde: {len(scraped_info)} tegn")
+
+        response = client.chat.completions.create(
+            model="gpt-5",
             messages=[
-                {"role": "system", "content": "Du er en erfaren Google Ads strateg, der laver indledende analyse før kampagnestruktur."},
-                {"role": "user", "content": analysis_prompt}
-            ],
-            max_tokens=1200,
-            temperature=0.6
+                {"role": "system", "content": "Du er en erfaren Google Ads strateg, der laver foranalyse og konkurrentanalyse før kampagnestruktur."},
+                {"role": "user", "content": combined_analysis_prompt}
+            ]
         )
-        analysis_text = analysis_response.choices[0].message.content
-        st.write(analysis_text)
-
-        # Step 2: Konkurrentforslag (auto-suggest)
-        st.subheader("🧭 Finder konkurrenter ...")
-        suggest_prompt = f"""Du er en marketingstrateg. Baseret på virksomheden her: {customer_website}
-Nedenfor er uddrag fra websitet samt en kort Xpect. Find 2–5 vigtigste konkurrenter i Danmark.
-Returnér KUN en kommasepareret liste over roddomæner (uden http/https og uden understier).
-
-Website-uddrag:
-{scraped_info}
-
-Xpect (kort):
-{xpect_text[:1200]}"""
-        suggest_response = client.chat.completions.create(
-            model=model_choice,
-            messages=[
-                {"role": "system", "content": "Du laver kort, præcis konkurrentliste (kun domæner, komma-separeret)."},
-                {"role": "user", "content": suggest_prompt}
-            ],
-            max_tokens=200,
-            temperature=0.3
-        )
-        suggestion_text = suggest_response.choices[0].message.content
-        suggested = extract_domains(suggestion_text)
+        st.write("✅ Modtog svar fra GPT-5")
+        output = response.choices[0].message.content
+        try:
+            parsed = json.loads(output)
+        except Exception:
+            # fallback: find JSON in output
+            m = re.search(r"\{.*\}", output, re.DOTALL)
+            if m:
+                try:
+                    parsed = json.loads(m.group(0))
+                except Exception:
+                    parsed = {}
+            else:
+                parsed = {}
+        foranalyse = parsed.get("foranalyse", "")
+        konkurrenter = parsed.get("konkurrenter", "")
+        konkurrentanalyse = parsed.get("konkurrentanalyse", "")
+        # fallback: extract domains if konkurrenter is not a list
+        suggested = extract_domains(konkurrenter)
         if not suggested:
             suggested = get_external_domains_from_homepage(customer_website, max_domains=5)
         own = urlparse(customer_website).netloc.replace("www.", "").lower()
         suggested = [d for d in suggested if d and d != own]
         st.session_state["competitor_input"] = ", ".join(sorted(set(suggested)))
-        st.write("🔎 Foreslåede konkurrenter:", st.session_state["competitor_input"])
-
-        # Step 3: Konkurrentanalyse
-        st.subheader("🏁 Kører konkurrentanalyse ...")
-        competitor_input = st.session_state.get("competitor_input", "")
-        competitor_analysis_prompt = f"""Du er en ekspert i Google Ads konkurrentanalyse.
-Baseret på disse inputs (konkurrent-domæner og/eller søgeord):
-{competitor_input}
-
-Lever en kort dansk analyse der for hver dominerende konkurrent angiver:
-- Primære budskaber
-- USP’er
-- CTA’er
-- Tone og stil
-- Gaps
-Afslut med 3–5 forslag til hvordan vi kan differentiere os."""
-        ca_response = client.chat.completions.create(
-            model=model_choice,
-            messages=[
-                {"role": "system", "content": "Du er en erfaren Google Ads strateg, der laver konkurrentanalyse for at informere kampagneopbygning."},
-                {"role": "user", "content": competitor_analysis_prompt}
-            ],
-            max_tokens=1200,
-            temperature=0.6
-        )
-        competitor_analysis_text = ca_response.choices[0].message.content
-        st.write(competitor_analysis_text)
-        st.session_state["analysis_text"] = analysis_text
-        st.session_state["competitor_analysis_text"] = competitor_analysis_text
+        st.session_state["analysis_text"] = foranalyse
+        st.session_state["competitor_analysis_text"] = konkurrentanalyse
         st.session_state["analyses_ready"] = True
         st.session_state["analysis_hash"] = compute_input_hash(
             xpect_text,
@@ -331,8 +343,14 @@ Afslut med 3–5 forslag til hvordan vi kan differentiere os."""
             selected_campaign_types,
             total_daily_budget,
         )
+        st.subheader("📊 Foranalyse")
+        st.write(foranalyse)
+        st.subheader("🔎 Foreslåede konkurrenter")
+        st.write(st.session_state["competitor_input"])
+        st.subheader("🏁 Konkurrentanalyse")
+        st.write(konkurrentanalyse)
     except Exception as e:
-        st.warning(f"Analyse mislykkedes: {e}")
+        st.error(f"Analyse mislykkedes: {e}")
 else:
     if run_all_analyses:
         st.warning("⚠️ Udfyld Xpect, Website og API-nøgle før du kører analyserne.")
@@ -425,13 +443,11 @@ def headline_cleanup(texts, api_key, model_choice, max_len=30, label="overskrift
     try:
         client = OpenAI(api_key=api_key)
         resp = client.chat.completions.create(
-            model=model_choice,
+            model="gpt-5",
             messages=[
                 {"role": "system", "content": "Du er en dansk tekstforfatter for Google Ads. Du skriver fængende, men korte sætninger."},
                 {"role": "user", "content": prompt}
-            ],
-            max_tokens=400,
-            temperature=0.6
+            ]
         )
         suggestions = [s.strip() for s in resp.choices[0].message.content.split("\n") if s.strip()]
         idx = 0
@@ -538,36 +554,116 @@ if st.button("Gem og fortsæt"):
 
     with st.spinner("🤖 AI arbejder på at analysere input og oprette kampagnestruktur..."):
         system_prompt = """\
-Du er en ekspert i Google Ads. Du skal hjælpe med at oprette en kampagnestruktur til en ny kunde.
-Baseret på input fra en kravspecifikation (Xpect), en URL, analyse og ekstra noter, skal du foreslå følgende:
-- Kampagnestruktur (Search / Display / evt. brand vs. generisk)
-- Kampagnenavne
-- Annoncegrupper (med tema og fokus)
-- Søgeord (maks 10 pr. gruppe)
-- Dagsbudget pr. kampagne
-- En annonce pr. annoncegruppe med minimum 9 overskrifter og 4 beskrivelser
-- Generér altid kampagneudvidelser: præcis 4 undersidelinks, 3-4 infotekster, structured snippets og opkaldsudvidelser.
-Output skal være i JSON med topnøglen "campaigns".
+Create a detailed Google Ads campaign structure for a new client using the provided requirements specification (Xpect), URL, analysis, and extra notes as input. Your tasks are to:
 
-**Vigtige retningslinjer for annoncetekster:**
-- Skriv hele, men korte sætninger (mål 20–30 tegn). Afkort aldrig midt i et ord.
-- Alle overskrifter skal være komplette sætninger der giver mening for brugeren.
-- **Må IKKE slutte** på et enkelt funktionsord: "i", "på", "til", "for", "med", "om", "af", "hos", "ved", "uden", "over", "under", "mellem".
-- Brug naturligt, flydende sprog som i professionelle Google Ads på dansk.
-- Brug kun stort begyndelsesbogstav ved starten af sætning eller ved egennavne.
-- Beskrivelser må være op til 90 tegn og skal være fulde, meningsfulde sætninger – aldrig afbrudte.
-- Undgå gentagelser, tomme ord eller halve sætninger.
+- Propose the following components:
+  - **Campaign structure:** Specify type(s) (Search/Display), and note if it's brand vs. generic.
+  - **Campaign names**
+  - **Ad groups** (with clear theme and focus)
+  - **Keywords:** Up to 10 for each ad group
+  - **Daily budget** for each campaign
+  - **One ad per ad group** with at least 9 unique, high-quality Danish headlines and 4 descriptions.
+  - **Campaign extensions:** Always include exactly 4 sitelinks, 3-4 callout extensions, structured snippets, and call extensions.
 
-**Eksempler på gode overskrifter (under 30 tegn):**
+#### Important ad copy guidelines (headlines & descriptions):
+
+- Write short, complete sentences (20–30 characters per headline).
+- Do not truncate in the middle of words.
+- All headlines must be full, meaningful sentences for users.
+- **Never end** a headline or description with a single Danish function word: “i”, “på”, “til”, “for”, “med”, “om”, “af”, “hos”, “ved”, “uden”, “over”, “under”, “mellem”.
+- Use natural, flowing, and professional Danish as seen in real Google Ads.
+- Only capitalize at the beginning of sentences or for proper nouns.
+- Descriptions (max 90 characters) must be full, meaningful sentences—never cut off or incomplete.
+- Avoid repetition, filler, or partial sentences.
+
+**Good headline examples (under 30 characters):**
 - “Flyt nemt og sikkert”
 - “Få gratis flyttetilbud”
 - “Transport i hele Jylland”
 - “Professionel flyttehjælp”
 
-**Eksempler på gode beskrivelser:**
+**Good description examples:**
 - “Vi tilbyder tryg og hurtig flytning i hele Danmark.”
 - “Få et gratis tilbud og flyt uden besvær.”
 - “Erfaren flyttehjælp til private og erhverv.”
+
+---
+
+### Output Format
+
+- Output MUST be in JSON format with the top key: **"campaigns"**
+- Each campaign must include: campaign type, name, daily budget, ad groups (with name, theme, keywords), ad (with 9+ headlines, 4+ descriptions), and extensions (sitelinks, callouts, structured snippets, call).
+- Do NOT add explanations or text outside the JSON structure.
+
+---
+
+### Reasoning and Output Ordering
+
+1. **Reasoning and Drafting:** Internally, first analyze all input information (brief/specification, URL, analysis, extra notes), select relevant themes, and define a logical account and campaign structure. Then, for each element (ad groups, keywords, extensions, etc.), determine optimal content based on the input. Ensure all ad text rules are followed and content is audience-appropriate.
+2. **Conclusion/Output:** Only after the complete structure and copy are finalized, output the full JSON as described.
+
+**NB:** Your output should consist exclusively of the final “campaigns” JSON, meeting all detailed requirements.
+
+---
+
+### Example (shortened for illustration only; real output should be longer and more detailed):
+
+#### Input:
+- Xpect: [Kravspecifikation placeholder]
+- URL: [www.flytteservice.dk]
+- Analyse: [Målgruppen er private og mindre erhverv, fokus på lokal service.]
+- Noter: [Ønsker at fremstå professionel og hjælpsom.]
+
+#### Output:
+{
+  "campaigns": [
+    {
+      "type": "Search",
+      "name": "Flytning Privat",
+      "daily_budget": 500,
+      "ad_groups": [
+        {
+          "name": "Flytning tilbud",
+          "theme": "Tilbud og pris på flytning",
+          "keywords": ["flyttetilbud", "pris på flytning", "..."],
+          "ad": {
+            "headlines": [
+              "Få gratis flyttetilbud",
+              "Flyt trygt og nemt",
+              "...(mindst 9 i alt)..."
+            ],
+            "descriptions": [
+              "Få et gratis tilbud og flyt uden besvær.",
+              "Erfarent hold hjælper dig hele vejen.",
+              "...(mindst 4 i alt)..."
+            ]
+          }
+        }
+        // ... fl. annoncegrupper ...
+      ],
+      "extensions": {
+        "sitelinks": ["Om os", "Kontakt", "Referencer", "Priser"],
+        "callouts": ["Gratis tilbud", "Erfaren flyttemand", "..."],
+        "structured_snippets": ["Byer: København, Aarhus, Odense"],
+        "call": ["+45 12 34 56 78"]
+      }
+    }
+    // ... fl. kampagner ...
+  ]
+}
+
+---
+
+#### Edge Cases & Special Notes
+
+- If the input includes branding or generic strategies, ensure campaigns reflect this split.
+- If you need to invent plausible ad copy, make sure everything meets the stated ad guidelines.
+- Use placeholders for sensitive or variable input data (e.g., [VIRKSOMHEDSNAVN], [TELEFONNUMMER]).
+- If the input specification is sparse, draft the most logical Google Ads campaign structure possible.
+
+---
+
+**REMINDER:** Your task is to produce only the campaigns JSON per the structure above, following all copy/extension rules. Think step-by-step before outputting the final result.
 """
 
         analysis_for_prompt = st.session_state.get("analysis_text", "")
@@ -607,13 +703,11 @@ Hvis budgettet er lavt, fordel det jævnt mellem områderne.
 
             client = OpenAI(api_key=api_key)
             response = client.chat.completions.create(
-                model=model_choice,
+                model="gpt-5",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
-                ],
-                max_tokens=4000,
-                temperature=0.4
+                ]
             )
             output_text = response.choices[0].message.content
 
