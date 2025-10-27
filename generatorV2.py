@@ -131,7 +131,7 @@ def fetch_semrush_metrics(keywords, api_key=None, database="dk"):
         return result
     url = "https://niclasaccess.generaxion.dev/api/seo-analysis/batch-keyword-analysis"
     headers = {
-        "Authorization": "Bearer token/Vami3KQpV0DUR1S18K4FomlfGgITrCFU/api/seo-analysis/batch-keyword-analysis",
+        "Authorization": "Bearer Vami3KQpV0DUR1S18K4FomlfGgITrCFU",
         "Content-Type": "application/json"
     }
     try:
@@ -409,8 +409,10 @@ if st.session_state["step"] == "input":
     st.session_state["additional_info"] = additional_info
 
     # --- Knap til at gå videre til analyse-fasen ---
+    placeholder = st.empty()
     if st.button("🔍 Kør analyser"):
-        # Gem input i session_state og gå til næste trin
+        placeholder.info("🧠 Analyserer data…")
+        time.sleep(0.5)
         st.session_state["step"] = "analysis"
         st.rerun()
 
@@ -440,10 +442,10 @@ if st.session_state["step"] == "analysis":
 
     # Kør kun AI-analyse første gang (eller hvis man sletter "analysis_ready" fra session_state)
     if not st.session_state.get("analysis_ready"):
-        with st.spinner("🧠 Analyserer data…"):
-            try:
-                client = OpenAI(api_key=api_key)
-                combined_analysis_prompt = f"""Du er en erfaren Google Ads strateg.
+        st.info("🧠 Analyserer data…")
+        try:
+            client = OpenAI(api_key=api_key)
+            combined_analysis_prompt = f"""Du er en erfaren Google Ads strateg.
 Baseret på nedenstående input (Xpect, website, website-indhold, ekstra noter, geografiske områder, ønskede kampagnetyper og budget), skal du udføre en samlet analyse bestående af:
 
 1. **Foranalyse**:
@@ -495,50 +497,50 @@ Geografiske områder:
 Samlet dagsbudget:
 {total_daily_budget} kr.
 """
-                response = client.chat.completions.create(
-                    model="gpt-5",
-                    messages=[
-                        {"role": "system", "content": "Du er en erfaren Google Ads strateg, der laver foranalyse og konkurrentanalyse før kampagnestruktur."},
-                        {"role": "user", "content": combined_analysis_prompt}
-                    ]
-                )
-                output = response.choices[0].message.content
-                try:
-                    parsed = json.loads(output)
-                except Exception:
-                    m = re.search(r"\{.*\}", output, re.DOTALL)
-                    if m:
-                        try:
-                            parsed = json.loads(m.group(0))
-                        except Exception:
-                            parsed = {}
-                    else:
+            response = client.chat.completions.create(
+                model="gpt-5",
+                messages=[
+                    {"role": "system", "content": "Du er en erfaren Google Ads strateg, der laver foranalyse og konkurrentanalyse før kampagnestruktur."},
+                    {"role": "user", "content": combined_analysis_prompt}
+                ]
+            )
+            output = response.choices[0].message.content
+            try:
+                parsed = json.loads(output)
+            except Exception:
+                m = re.search(r"\{.*\}", output, re.DOTALL)
+                if m:
+                    try:
+                        parsed = json.loads(m.group(0))
+                    except Exception:
                         parsed = {}
-                foranalyse = parsed.get("foranalyse", "")
-                konkurrenter = parsed.get("konkurrenter", "")
-                konkurrentanalyse = parsed.get("konkurrentanalyse", "")
-                suggested = extract_domains(konkurrenter)
-                if not suggested:
-                    suggested = get_external_domains_from_homepage(customer_website, max_domains=5)
-                own = urlparse(customer_website).netloc.replace("www.", "").lower()
-                suggested = [d for d in suggested if d and d != own]
-                st.session_state["competitor_input"] = ", ".join(sorted(set(suggested)))
-                st.session_state["analysis_text"] = foranalyse
-                st.session_state["competitor_analysis_text"] = konkurrentanalyse
-                st.session_state["analyses_ready"] = True
-                st.session_state["analysis_hash"] = compute_input_hash(
-                    xpect_text,
-                    customer_website,
-                    additional_info,
-                    geo_areas,
-                    selected_campaign_types,
-                    total_daily_budget,
-                )
-                st.session_state["analysis_ready"] = True
-                st.success("✅ Analyse færdig – du kan nu redigere resultaterne herunder.")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Analyse mislykkedes: {e}")
+                else:
+                    parsed = {}
+            foranalyse = parsed.get("foranalyse", "")
+            konkurrenter = parsed.get("konkurrenter", "")
+            konkurrentanalyse = parsed.get("konkurrentanalyse", "")
+            suggested = extract_domains(konkurrenter)
+            if not suggested:
+                suggested = get_external_domains_from_homepage(customer_website, max_domains=5)
+            own = urlparse(customer_website).netloc.replace("www.", "").lower()
+            suggested = [d for d in suggested if d and d != own]
+            st.session_state["competitor_input"] = ", ".join(sorted(set(suggested)))
+            st.session_state["analysis_text"] = foranalyse
+            st.session_state["competitor_analysis_text"] = konkurrentanalyse
+            st.session_state["analyses_ready"] = True
+            st.session_state["analysis_hash"] = compute_input_hash(
+                xpect_text,
+                customer_website,
+                additional_info,
+                geo_areas,
+                selected_campaign_types,
+                total_daily_budget,
+            )
+            st.session_state["analysis_ready"] = True
+            st.success("✅ Analyse færdig – du kan nu redigere resultaterne herunder.")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Analyse mislykkedes: {e}")
 
     else:
         # ALTID vis tekstfelter, med data fra session_state (ingen AI-kald)
@@ -561,8 +563,11 @@ Samlet dagsbudget:
             key="konkurrence_temp"
         )
 
-        # Når man trykker på knappen, gem ændringer og gå videre
+        # Når man trykker på knappen, gem ændringer og gå videre med lokal spinner
+        placeholder = st.empty()
         if st.button("➡️ Fortsæt til søgeordsudvælgelse"):
+            placeholder.info("🤖 Genererer søgeordsforslag…")
+            time.sleep(0.5)
             st.session_state["analysis_text"] = st.session_state["foranalyse_temp"]
             st.session_state["competitor_analysis_text"] = st.session_state["konkurrence_temp"]
             st.session_state["step"] = "keywords"
@@ -616,20 +621,20 @@ Ekstra noter:
     if "keywords_generated" in st.session_state:
         keywords_raw = st.session_state["keywords_generated"]
     else:
-        with st.spinner("🤖 Genererer søgeordsforslag…"):
-            client = OpenAI(api_key=api_key)
-            response = client.chat.completions.create(
-                model="gpt-5",
-                messages=[
-                    {"role": "system", "content": "Du er en Google Ads-specialist, der laver keyword research på dansk."},
-                    {"role": "user", "content": keyword_prompt}
-                ]
-            )
-            keywords_raw = response.choices[0].message.content
-            if not keywords_raw or len(keywords_raw.strip()) < 10:
-                st.warning("AI returnerede ingen søgeord — ingen søgeord tilgængelige.")
-                keywords_raw = ""
-            st.session_state["keywords_generated"] = keywords_raw
+        st.info("🤖 Genererer søgeordsforslag…")
+        client = OpenAI(api_key=api_key)
+        response = client.chat.completions.create(
+            model="gpt-5",
+            messages=[
+                {"role": "system", "content": "Du er en Google Ads-specialist, der laver keyword research på dansk."},
+                {"role": "user", "content": keyword_prompt}
+            ]
+        )
+        keywords_raw = response.choices[0].message.content
+        if not keywords_raw or len(keywords_raw.strip()) < 10:
+            st.warning("AI returnerede ingen søgeord — ingen søgeord tilgængelige.")
+            keywords_raw = ""
+        st.session_state["keywords_generated"] = keywords_raw
 
     # Rens og normalisér listen
     gpt_keywords = [k.strip().lower() for k in keywords_raw.split("\n") if len(k.strip()) > 2]
@@ -657,8 +662,8 @@ Ekstra noter:
             if data_source == "Google Keyword Planner" and gads_customer_id:
                 metrics_map = fetch_keyword_metrics(potential_keywords, gads_customer_id)
             elif data_source == "SEMrush":
-                with st.spinner("🔹 Henter søgedata fra Generaxion Keyword API…"):
-                    metrics_map = fetch_semrush_metrics(potential_keywords, database="dk")
+                st.info("🔹 Henter søgedata fra Generaxion Keyword API…")
+                metrics_map = fetch_semrush_metrics(potential_keywords, database="dk")
         def get_fallback_keywords(potential_keywords, metrics_map, min_count=10):
             valid = [k for k in potential_keywords if metrics_map.get(k.lower(), {}).get("monthly", 0) > 0]
             if len(valid) >= min_count:
@@ -725,8 +730,6 @@ Ekstra noter:
             mime="text/csv"
         )
 
-        with st.expander("⚠️ Vis søgeord uden søgevolumen"):
-            st.dataframe(df_keywords[df_keywords["Månedlige søgninger"] == 0], use_container_width=True)
         # Multiselect til valg/fravalg af søgeord (opdateret version)
         all_kw_display = sorted(set(
             st.session_state.get("approved_keywords", []) + df_valid["Søgeord"].tolist()
@@ -751,6 +754,7 @@ Ekstra noter:
                     st.session_state.get("approved_keywords", []) + extra
                 ))
                 st.success(f"Tilføjede {len(extra)} nye søgeord.")
+                st.session_state["new_keywords_input"] = ""
                 st.rerun()  # 🔹 Genindlæs for at vise søgeordet i listen og tabellen
             else:
                 st.info("Ingen nye unikke søgeord fundet.")
@@ -762,16 +766,25 @@ Ekstra noter:
             else:
                 with st.spinner("🔍 Henter søgevolumen for valgte søgeord..."):
                     updated_metrics = {}
-                    if data_source == "Google Keyword Planner" and gads_customer_id:
-                        updated_metrics = fetch_keyword_metrics(keywords_to_update, gads_customer_id)
-                    elif data_source == "SEMrush":
-                        updated_metrics = fetch_semrush_metrics(keywords_to_update, database="dk")
+                    # Hent kun søgeord der ikke allerede findes i metrics_map
+                    new_keywords = [k for k in keywords_to_update if k.lower() not in metrics_map]
+                    if not new_keywords:
+                        st.info("Alle valgte søgeord har allerede data — ingen opdatering nødvendig.")
+                        updated_metrics = {}
+                    else:
+                        if data_source == "Google Keyword Planner" and gads_customer_id:
+                            updated_metrics = fetch_keyword_metrics(new_keywords, gads_customer_id)
+                        elif data_source == "SEMrush":
+                            updated_metrics = fetch_semrush_metrics(new_keywords, database="dk")
 
                     if updated_metrics:
                         metrics_map.update(updated_metrics)
                         st.session_state["metrics_map"] = metrics_map
                         st.success(f"Søgevolumen opdateret for {len(updated_metrics)} søgeord.")
                         st.rerun()
+                    elif not new_keywords:
+                        # Ingen nye søgeord at opdatere, info allerede vist ovenfor
+                        pass
                     else:
                         st.warning("Ingen data returneret fra API’et – tjek forbindelsen eller søgeordene.")
         # Gem metrics_map i session_state til næste fase
@@ -779,7 +792,7 @@ Ekstra noter:
         # Knap til at godkende søgeord og gå videre (starter nu kampagnegenerering automatisk)
         if st.button("✅ Godkend søgeord"):
             st.session_state["step"] = "generation"
-            st.query_params(step="generation")
+            st.query_params["step"] = "generation"
             st.success("✅ Søgeord godkendt – kampagnestruktur genereres automatisk...")
             st.rerun()
 
