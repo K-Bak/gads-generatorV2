@@ -227,17 +227,16 @@ with st.sidebar:
     )
     api_key = st.text_input("Indtast din OpenAI API-nøgle", type="password", key="sidebar_openai_key")
     # SEMrush bruger nu Generaxion Keyword API (ingen nøgle nødvendig)
-    if model_choice and keyword_source:
-        # Google Ads Customer ID (always visible)
+    if keyword_source == "Google Keyword Planner":
         gads_customer_id = st.text_input(
             "Google Ads customer ID (uden bindestreger)",
             value="7445232535",
             key="sidebar_gads_customer_id"
         )
-        semrush_key = ""  # SEMrush bruger nu Generaxion API, ikke individuel nøgle
-    else:
         semrush_key = ""
+    else:
         gads_customer_id = ""
+        semrush_key = ""  # SEMrush bruger nu Generaxion API, ikke individuel nøgle
     # Expose chosen data source name for later logic
     data_source = keyword_source
 
@@ -431,7 +430,6 @@ if "analysis_hash" not in st.session_state:
 # --- Fase 2: ANALYSIS ---
 if st.session_state["step"] == "analysis":
     st.header("Kør analyser")
-    st.info("🤖 Analyserer input... dette kan tage et øjeblik.")
     xpect_text = st.session_state["xpect_text"]
     customer_website = st.session_state["customer_website"]
     additional_info = st.session_state["additional_info"]
@@ -439,9 +437,13 @@ if st.session_state["step"] == "analysis":
     selected_campaign_types = st.session_state["selected_campaign_types"]
     scraped_info = st.session_state["scraped_info"]
     total_daily_budget = st.session_state["total_daily_budget"]
-    try:
-        client = OpenAI(api_key=api_key)
-        combined_analysis_prompt = f"""Du er en erfaren Google Ads strateg.
+
+    # Kør kun AI-analyse første gang (eller hvis man sletter "analysis_ready" fra session_state)
+    if not st.session_state.get("analysis_ready"):
+        with st.spinner("🧠 Analyserer data…"):
+            try:
+                client = OpenAI(api_key=api_key)
+                combined_analysis_prompt = f"""Du er en erfaren Google Ads strateg.
 Baseret på nedenstående input (Xpect, website, website-indhold, ekstra noter, geografiske områder, ønskede kampagnetyper og budget), skal du udføre en samlet analyse bestående af:
 
 1. **Foranalyse**:
@@ -493,58 +495,78 @@ Geografiske områder:
 Samlet dagsbudget:
 {total_daily_budget} kr.
 """
-        with st.spinner("🤖 Analyserer data…"):
-            response = client.chat.completions.create(
-                model="gpt-5",
-                messages=[
-                    {"role": "system", "content": "Du er en erfaren Google Ads strateg, der laver foranalyse og konkurrentanalyse før kampagnestruktur."},
-                    {"role": "user", "content": combined_analysis_prompt}
-                ]
-            )
-        output = response.choices[0].message.content
-        try:
-            parsed = json.loads(output)
-        except Exception:
-            m = re.search(r"\{.*\}", output, re.DOTALL)
-            if m:
+                response = client.chat.completions.create(
+                    model="gpt-5",
+                    messages=[
+                        {"role": "system", "content": "Du er en erfaren Google Ads strateg, der laver foranalyse og konkurrentanalyse før kampagnestruktur."},
+                        {"role": "user", "content": combined_analysis_prompt}
+                    ]
+                )
+                output = response.choices[0].message.content
                 try:
-                    parsed = json.loads(m.group(0))
+                    parsed = json.loads(output)
                 except Exception:
-                    parsed = {}
-            else:
-                parsed = {}
-        foranalyse = parsed.get("foranalyse", "")
-        konkurrenter = parsed.get("konkurrenter", "")
-        konkurrentanalyse = parsed.get("konkurrentanalyse", "")
-        suggested = extract_domains(konkurrenter)
-        if not suggested:
-            suggested = get_external_domains_from_homepage(customer_website, max_domains=5)
-        own = urlparse(customer_website).netloc.replace("www.", "").lower()
-        suggested = [d for d in suggested if d and d != own]
-        st.session_state["competitor_input"] = ", ".join(sorted(set(suggested)))
-        st.session_state["analysis_text"] = foranalyse
-        st.session_state["competitor_analysis_text"] = konkurrentanalyse
-        st.session_state["analyses_ready"] = True
-        st.session_state["analysis_hash"] = compute_input_hash(
-            xpect_text,
-            customer_website,
-            additional_info,
-            geo_areas,
-            selected_campaign_types,
-            total_daily_budget,
+                    m = re.search(r"\{.*\}", output, re.DOTALL)
+                    if m:
+                        try:
+                            parsed = json.loads(m.group(0))
+                        except Exception:
+                            parsed = {}
+                    else:
+                        parsed = {}
+                foranalyse = parsed.get("foranalyse", "")
+                konkurrenter = parsed.get("konkurrenter", "")
+                konkurrentanalyse = parsed.get("konkurrentanalyse", "")
+                suggested = extract_domains(konkurrenter)
+                if not suggested:
+                    suggested = get_external_domains_from_homepage(customer_website, max_domains=5)
+                own = urlparse(customer_website).netloc.replace("www.", "").lower()
+                suggested = [d for d in suggested if d and d != own]
+                st.session_state["competitor_input"] = ", ".join(sorted(set(suggested)))
+                st.session_state["analysis_text"] = foranalyse
+                st.session_state["competitor_analysis_text"] = konkurrentanalyse
+                st.session_state["analyses_ready"] = True
+                st.session_state["analysis_hash"] = compute_input_hash(
+                    xpect_text,
+                    customer_website,
+                    additional_info,
+                    geo_areas,
+                    selected_campaign_types,
+                    total_daily_budget,
+                )
+                st.session_state["analysis_ready"] = True
+                st.success("✅ Analyse færdig – du kan nu redigere resultaterne herunder.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Analyse mislykkedes: {e}")
+
+    else:
+        # ALTID vis tekstfelter, med data fra session_state (ingen AI-kald)
+        st.subheader("📊 Foranalyse (kan redigeres)")
+        foranalyse_edit = st.text_area(
+            "",
+            value=st.session_state.get("analysis_text", ""),
+            height=800,
+            key="foranalyse_temp"
         )
-        st.subheader("📊 Foranalyse")
-        st.write(foranalyse)
+
         st.subheader("🔎 Foreslåede konkurrenter")
-        st.write(st.session_state["competitor_input"])
-        st.subheader("🏁 Konkurrentanalyse")
-        st.write(konkurrentanalyse)
-        # Tilføj knap til at fortsætte til søgeordsudvælgelse
+        st.write(st.session_state.get("competitor_input", ""))
+
+        st.subheader("🏁 Konkurrentanalyse (kan redigeres)")
+        konkurrence_edit = st.text_area(
+            "",
+            value=st.session_state.get("competitor_analysis_text", ""),
+            height=800,
+            key="konkurrence_temp"
+        )
+
+        # Når man trykker på knappen, gem ændringer og gå videre
         if st.button("➡️ Fortsæt til søgeordsudvælgelse"):
+            st.session_state["analysis_text"] = st.session_state["foranalyse_temp"]
+            st.session_state["competitor_analysis_text"] = st.session_state["konkurrence_temp"]
             st.session_state["step"] = "keywords"
             st.rerun()
-    except Exception as e:
-        st.error(f"Analyse mislykkedes: {e}")
 
 # --- Fase 3: KEYWORDS ---
 if st.session_state["step"] == "keywords":
@@ -668,53 +690,97 @@ Ekstra noter:
         df_valid = df_keywords[df_keywords["Månedlige søgninger"] > 0]
         st.subheader("🔑 Søgeord med søgevolumen")
         st.dataframe(df_valid, use_container_width=True)
+        # Download-knap til søgeord med volumen og CPC
+        csv_buffer = io.StringIO()
+        df_valid.to_csv(csv_buffer, index=False, sep=";")
+        st.download_button(
+            "💾 Download søgeord med volumen og CPC",
+            data=csv_buffer.getvalue(),
+            file_name="keywords.csv",
+            mime="text/csv"
+        )
+
+        # --- Helper: Format analysis/competitor text for readable output ---
+        def format_analysis_text(text):
+            if not text:
+                return ""
+            # Trim spaces and normalize newlines
+            text = text.strip().replace("\r", "")
+            # Replace multiple newlines with bullet formatting
+            lines = [l.strip() for l in text.split("\n") if l.strip()]
+            formatted = "• " + "\n• ".join(lines)
+            return formatted
+
+        # --- NY DOWNLOAD-KNAP: Kun analyser (CSV) ---
+        df_analyser = pd.DataFrame([{
+            "Foranalyse": format_analysis_text(st.session_state.get("analysis_text", "")),
+            "Konkurrentanalyse": format_analysis_text(st.session_state.get("competitor_analysis_text", ""))
+        }])
+        csv_buffer = io.StringIO()
+        df_analyser.to_csv(csv_buffer, index=False, sep=";")
+        st.download_button(
+            "💾 Download analyser (CSV)",
+            data=csv_buffer.getvalue(),
+            file_name="analyser.csv",
+            mime="text/csv"
+        )
+
         with st.expander("⚠️ Vis søgeord uden søgevolumen"):
             st.dataframe(df_keywords[df_keywords["Månedlige søgninger"] == 0], use_container_width=True)
-        # Multiselect til valg/fravalg af søgeord
+        # Multiselect til valg/fravalg af søgeord (opdateret version)
+        all_kw_display = sorted(set(
+            st.session_state.get("approved_keywords", []) + df_valid["Søgeord"].tolist()
+        ))
         approved = st.multiselect(
             "Vælg de søgeord du ønsker at inkludere",
-            options=df_valid["Søgeord"].tolist(),
-            default=df_valid["Søgeord"].tolist(),
+            options=all_kw_display,
+            default=st.session_state.get("approved_keywords", df_valid["Søgeord"].tolist()),
             key="approved_keywords_multiselect"
         )
         st.session_state["approved_keywords"] = approved
-        # Tekstfelt og knap til manuel tilføjelse af søgeord
+        # Tekstfelt og knap til manuel tilføjelse af søgeord (opdateret version)
         new_kw = st.text_area("Tilføj manuelt ekstra søgeord (ét pr. linje eller kommasepareret)", key="new_keywords_input")
         if st.button("➕ Tilføj søgeord"):
             extra = []
             for s in re.split(r"[,;\n]", new_kw):
                 s = s.strip()
-                if s and s not in st.session_state["approved_keywords"]:
+                if s and s not in st.session_state.get("approved_keywords", []):
                     extra.append(s)
             if extra:
-                st.session_state["approved_keywords"].extend([k for k in extra if k and k not in st.session_state["approved_keywords"]])
-                st.session_state["approved_keywords"] = sorted(set(st.session_state["approved_keywords"]))
+                st.session_state["approved_keywords"] = sorted(set(
+                    st.session_state.get("approved_keywords", []) + extra
+                ))
                 st.success(f"Tilføjede {len(extra)} nye søgeord.")
+                st.rerun()  # 🔹 Genindlæs for at vise søgeordet i listen og tabellen
             else:
                 st.info("Ingen nye unikke søgeord fundet.")
         # Mulighed for at fjerne søgeord
         if st.button("🔁 Opdater søgevolumen for valgte søgeord"):
-            keywords_to_update = st.session_state["approved_keywords"]
+            keywords_to_update = st.session_state.get("approved_keywords", [])
             if not keywords_to_update:
                 st.warning("Ingen valgte søgeord.")
             else:
-                with st.spinner("🔍 Henter søgeord..."):
+                with st.spinner("🔍 Henter søgevolumen for valgte søgeord..."):
+                    updated_metrics = {}
                     if data_source == "Google Keyword Planner" and gads_customer_id:
                         updated_metrics = fetch_keyword_metrics(keywords_to_update, gads_customer_id)
-                        metrics_map.update(updated_metrics)
                     elif data_source == "SEMrush":
-                        if semrush_key:
-                            updated_metrics = fetch_semrush_metrics(keywords_to_update, semrush_key, database="dk")
-                            metrics_map.update(updated_metrics)
-                        else:
-                            st.info("🔹 SEMrush-data hentes.")
-                st.success("Søgevolumen opdateret for valgte søgeord.")
+                        updated_metrics = fetch_semrush_metrics(keywords_to_update, database="dk")
+
+                    if updated_metrics:
+                        metrics_map.update(updated_metrics)
+                        st.session_state["metrics_map"] = metrics_map
+                        st.success(f"Søgevolumen opdateret for {len(updated_metrics)} søgeord.")
+                        st.rerun()
+                    else:
+                        st.warning("Ingen data returneret fra API’et – tjek forbindelsen eller søgeordene.")
         # Gem metrics_map i session_state til næste fase
         st.session_state["metrics_map"] = metrics_map
-        # Knap til at godkende søgeord og gå videre
+        # Knap til at godkende søgeord og gå videre (starter nu kampagnegenerering automatisk)
         if st.button("✅ Godkend søgeord"):
             st.session_state["step"] = "generation"
-            st.experimental_set_query_params(step="generation")
+            st.query_params(step="generation")
+            st.success("✅ Søgeord godkendt – kampagnestruktur genereres automatisk...")
             st.rerun()
 
 
@@ -802,34 +868,32 @@ def normalize_ad_obj(ad: dict, customer_website: str) -> dict:
 if st.session_state["step"] == "generation":
     st.header("Generér kampagnestruktur")
     st.info("Kampagnestrukturen bygges på baggrund af de valgte søgeord og analyser.")
-    if st.button("💾 Gem og fortsæt"):
-        # Kør kampagnestrukturbygning
-        # (Flyttet fra tidligere "Gem og fortsæt"-knap)
-        xpect_text = st.session_state["xpect_text"]
-        customer_website = st.session_state["customer_website"]
-        additional_info = st.session_state["additional_info"]
-        geo_areas = st.session_state["geo_areas"]
-        selected_campaign_types = st.session_state["selected_campaign_types"]
-        scraped_info = st.session_state["scraped_info"]
-        total_daily_budget = st.session_state["total_daily_budget"]
-        analysis_for_prompt = st.session_state.get("analysis_text", "")
-        competitor_analysis_for_prompt = st.session_state.get("competitor_analysis_text", "")
-        approved_keywords = st.session_state.get("approved_keywords", [])
-        # Fallback: hent metrics_map fra session_state hvis muligt
-        metrics_map = st.session_state.get("metrics_map", {})
-        # Ny filtreringslogik for approved_keywords ifm. metrics_map
-        approved_keywords = approved_keywords or []
-        if metrics_map:
-            valid_kw = [kw for kw in approved_keywords if metrics_map.get(kw.lower(), {}).get("monthly", 0) > 0]
-            if not valid_kw:
-                st.warning("Ingen søgeord med søgevolumen > 0 fundet – fortsætter med alle godkendte søgeord.")
-                valid_kw = approved_keywords
-            approved_keywords = valid_kw
-        else:
-            st.warning("Ingen søgedata fundet – fortsætter med alle godkendte søgeord.")
-        # Visuel bekræftelse på antal søgeord inkluderet
-        st.info(f"📊 {len(approved_keywords)} søgeord inkluderet i kampagnestrukturen.")
-        system_prompt = """\
+    # Kør kampagnestrukturbygning automatisk
+    xpect_text = st.session_state["xpect_text"]
+    customer_website = st.session_state["customer_website"]
+    additional_info = st.session_state["additional_info"]
+    geo_areas = st.session_state["geo_areas"]
+    selected_campaign_types = st.session_state["selected_campaign_types"]
+    scraped_info = st.session_state["scraped_info"]
+    total_daily_budget = st.session_state["total_daily_budget"]
+    analysis_for_prompt = st.session_state.get("analysis_text", "")
+    competitor_analysis_for_prompt = st.session_state.get("competitor_analysis_text", "")
+    approved_keywords = st.session_state.get("approved_keywords", [])
+    # Fallback: hent metrics_map fra session_state hvis muligt
+    metrics_map = st.session_state.get("metrics_map", {})
+    # Ny filtreringslogik for approved_keywords ifm. metrics_map
+    approved_keywords = approved_keywords or []
+    if metrics_map:
+        valid_kw = [kw for kw in approved_keywords if metrics_map.get(kw.lower(), {}).get("monthly", 0) > 0]
+        if not valid_kw:
+            st.warning("Ingen søgeord med søgevolumen > 0 fundet – fortsætter med alle godkendte søgeord.")
+            valid_kw = approved_keywords
+        approved_keywords = valid_kw
+    else:
+        st.warning("Ingen søgedata fundet – fortsætter med alle godkendte søgeord.")
+    # Visuel bekræftelse på antal søgeord inkluderet
+    st.info(f"📊 {len(approved_keywords)} søgeord inkluderet i kampagnestrukturen.")
+    system_prompt = """\
 Create a detailed Google Ads campaign structure for a new client using the provided requirements specification (Xpect), URL, analysis, and extra notes as input. Your tasks are to:
 
 - Propose the following components:
@@ -880,7 +944,7 @@ Create a detailed Google Ads campaign structure for a new client using the provi
 
 **NB:** Your output should consist exclusively of the final “campaigns” JSON, meeting all detailed requirements.
 """
-        user_prompt = f"""\
+    user_prompt = f"""\
 Xpect:
 {xpect_text}
 
@@ -908,212 +972,212 @@ Lav kampagnestrukturen så der laves kampagner eller annoncegrupper for alle næ
 Hvis budgettet er lavt, fordel det jævnt mellem områderne.
 Brug kun følgende søgeord (med bekræftet søgevolumen): {', '.join(approved_keywords) if approved_keywords else '[Ingen validerede søgeord fundet]'}
 """
+    try:
+        if not api_key:
+            st.error("Indtast din OpenAI API-nøgle i sidebaren for at køre AI-analysen.")
+            raise RuntimeError("Missing API key")
+        with st.spinner("🧠 Genererer kampagnestruktur…"):
+            client = OpenAI(api_key=api_key)
+            response = client.chat.completions.create(
+                model="gpt-5",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ]
+            )
+            output_text = response.choices[0].message.content
         try:
-            if not api_key:
-                st.error("Indtast din OpenAI API-nøgle i sidebaren for at køre AI-analysen.")
-                raise RuntimeError("Missing API key")
-            with st.spinner("🧠 Genererer kampagnestruktur…"):
-                client = OpenAI(api_key=api_key)
-                response = client.chat.completions.create(
-                    model="gpt-5",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ]
-                )
-                output_text = response.choices[0].message.content
-            try:
-                data = extract_json_from_text(output_text)
-            except ValueError as e:
-                st.error(str(e))
-                data = None
-            if not data:
-                st.info("AI genererede ingen gyldig kampagnestruktur.")
-                st.stop()
-            # --- Hent søgevolumen/CPC/konkurrence for alle keywords (gentag evt. for endelig struktur) ---
-            all_keywords = []
-            for c in data.get("campaigns", []):
-                for ag in c.get("ad_groups", []) or []:
-                    all_keywords.extend((ag.get("keywords") or []))
-            unique_keywords = sorted(set([k.strip() for k in all_keywords if isinstance(k, str) and k.strip()]))
-            if unique_keywords:
-                missing_metrics = [k for k in unique_keywords if k.lower() not in metrics_map]
-                if missing_metrics:
-                    if data_source == "Google Keyword Planner" and gads_customer_id:
-                        extra_metrics = fetch_keyword_metrics(missing_metrics, gads_customer_id)
+            data = extract_json_from_text(output_text)
+        except ValueError as e:
+            st.error(str(e))
+            data = None
+        if not data:
+            st.info("AI genererede ingen gyldig kampagnestruktur.")
+            st.stop()
+        # --- Hent søgevolumen/CPC/konkurrence for alle keywords (gentag evt. for endelig struktur) ---
+        all_keywords = []
+        for c in data.get("campaigns", []):
+            for ag in c.get("ad_groups", []) or []:
+                all_keywords.extend((ag.get("keywords") or []))
+        unique_keywords = sorted(set([k.strip() for k in all_keywords if isinstance(k, str) and k.strip()]))
+        if unique_keywords:
+            missing_metrics = [k for k in unique_keywords if k.lower() not in metrics_map]
+            if missing_metrics:
+                if data_source == "Google Keyword Planner" and gads_customer_id:
+                    extra_metrics = fetch_keyword_metrics(missing_metrics, gads_customer_id)
+                    metrics_map.update(extra_metrics)
+                    st.session_state["metrics_map"] = metrics_map
+                elif data_source == "SEMrush":
+                    if semrush_key:
+                        extra_metrics = fetch_semrush_metrics(missing_metrics, semrush_key, database="dk")
                         metrics_map.update(extra_metrics)
                         st.session_state["metrics_map"] = metrics_map
-                    elif data_source == "SEMrush":
-                        if semrush_key:
-                            extra_metrics = fetch_semrush_metrics(missing_metrics, semrush_key, database="dk")
-                            metrics_map.update(extra_metrics)
-                            st.session_state["metrics_map"] = metrics_map
-            rows = []
-            TRAILING_STOPWORDS = {
-                "i","på","til","for","med","om","af","hos","ved","uden","over","under","mellem"
-            }
-            def soft_trim(text: str, max_len: int) -> str:
-                if not text:
-                    return ""
-                t = text.strip()
-                if len(t) <= max_len:
-                    return t
-                cut = t[:max_len]
-                if " " in cut:
-                    cut = cut.rsplit(" ", 1)[0]
-                return cut.strip()
-            def polish_line(text: str, max_len: int) -> str:
-                if not text:
-                    return ""
-                t = soft_trim(text, max_len)
-                t = t.strip(" -·•,;:")
-                parts = t.split()
-                if parts and parts[-1].lower() in TRAILING_STOPWORDS:
-                    t = " ".join(parts[:-1]).strip()
+        rows = []
+        TRAILING_STOPWORDS = {
+            "i","på","til","for","med","om","af","hos","ved","uden","over","under","mellem"
+        }
+        def soft_trim(text: str, max_len: int) -> str:
+            if not text:
+                return ""
+            t = text.strip()
+            if len(t) <= max_len:
                 return t
-            def clean_asset(text, m):
-                if not text:
-                    return ""
-                return polish_line(text, m)
-            for campaign in data.get("campaigns", []):
-                campaign_name = campaign.get("name", "")
-                campaign_type = campaign.get("type", "")
-                budget = campaign.get("daily_budget", "")
-                sitelinks = campaign.get("sitelinks", [])
-                callouts = campaign.get("callouts", [])
-                structured_snippets = campaign.get("structured_snippets", [])
-                call_extensions = campaign.get("call_extensions", [])
-                for ad_group in campaign.get("ad_groups", []):
-                    ad_group_name = ad_group.get("name", "")
-                    keywords = ad_group.get("keywords", []) or []
-                    ads = ad_group.get("ads", []) or []
-                    ad = ads[0] if ads else {}
-                    if not ad and isinstance(ad_group.get("ad"), dict):
-                        ad = ad_group.get("ad")
-                    if not ad and isinstance(ad_group.get("rsa"), dict):
-                        ad = ad_group.get("rsa")
-                    ad = normalize_ad_obj(ad, customer_website)
-                    ad_headlines = [clean_asset(ad.get(f"headline_{i}", ""), 30) for i in range(1, 10)]
-                    ad_descriptions = [clean_asset(ad.get(f"description_{i}", ""), 90) for i in range(1,5)]
-                    final_url = ad.get("final_url", customer_website or "")
-                    pinned_headlines = ad.get("pinned_headlines", {}) if isinstance(ad.get("pinned_headlines"), dict) else {}
-                    base_row = {
-                        "Campaign": campaign_name,
-                        "Campaign Type": campaign_type,
-                        "Campaign Status": "Enabled",
-                        "Budget": budget,
-                        "Budget type": "Daily",
-                        "Networks": "Google search",
-                        "Languages": "Danish;English",
-                        "Ad Group": ad_group_name,
-                        "Ad Group Status": "Enabled",
-                        "Ad type": "Responsive search ad",
-                        "Criterion Type": "",
+            cut = t[:max_len]
+            if " " in cut:
+                cut = cut.rsplit(" ", 1)[0]
+            return cut.strip()
+        def polish_line(text: str, max_len: int) -> str:
+            if not text:
+                return ""
+            t = soft_trim(text, max_len)
+            t = t.strip(" -·•,;:")
+            parts = t.split()
+            if parts and parts[-1].lower() in TRAILING_STOPWORDS:
+                t = " ".join(parts[:-1]).strip()
+            return t
+        def clean_asset(text, m):
+            if not text:
+                return ""
+            return polish_line(text, m)
+        for campaign in data.get("campaigns", []):
+            campaign_name = campaign.get("name", "")
+            campaign_type = campaign.get("type", "")
+            budget = campaign.get("daily_budget", "")
+            sitelinks = campaign.get("sitelinks", [])
+            callouts = campaign.get("callouts", [])
+            structured_snippets = campaign.get("structured_snippets", [])
+            call_extensions = campaign.get("call_extensions", [])
+            for ad_group in campaign.get("ad_groups", []):
+                ad_group_name = ad_group.get("name", "")
+                keywords = ad_group.get("keywords", []) or []
+                ads = ad_group.get("ads", []) or []
+                ad = ads[0] if ads else {}
+                if not ad and isinstance(ad_group.get("ad"), dict):
+                    ad = ad_group.get("ad")
+                if not ad and isinstance(ad_group.get("rsa"), dict):
+                    ad = ad_group.get("rsa")
+                ad = normalize_ad_obj(ad, customer_website)
+                ad_headlines = [clean_asset(ad.get(f"headline_{i}", ""), 30) for i in range(1, 10)]
+                ad_descriptions = [clean_asset(ad.get(f"description_{i}", ""), 90) for i in range(1,5)]
+                final_url = ad.get("final_url", customer_website or "")
+                pinned_headlines = ad.get("pinned_headlines", {}) if isinstance(ad.get("pinned_headlines"), dict) else {}
+                base_row = {
+                    "Campaign": campaign_name,
+                    "Campaign Type": campaign_type,
+                    "Campaign Status": "Enabled",
+                    "Budget": budget,
+                    "Budget type": "Daily",
+                    "Networks": "Google search",
+                    "Languages": "Danish;English",
+                    "Ad Group": ad_group_name,
+                    "Ad Group Status": "Enabled",
+                    "Ad type": "Responsive search ad",
+                    "Criterion Type": "",
+                    "Status": "Enabled",
+                    "Keyword": "",
+                    "Keyword Match Type": "",
+                    "Keyword Status": "",
+                    "Headline 1": ad_headlines[0],
+                    "Headline 2": ad_headlines[1],
+                    "Headline 3": ad_headlines[2],
+                    "Headline 4": ad_headlines[3],
+                    "Headline 5": ad_headlines[4],
+                    "Headline 6": ad_headlines[5],
+                    "Headline 7": ad_headlines[6],
+                    "Headline 8": ad_headlines[7],
+                    "Headline 9": ad_headlines[8],
+                    "Headline 1 Pin": pinned_headlines.get("headline_1", ""),
+                    "Headline 2 Pin": pinned_headlines.get("headline_2", ""),
+                    "Headline 3 Pin": pinned_headlines.get("headline_3", ""),
+                    "Headline 4 Pin": pinned_headlines.get("headline_4", ""),
+                    "Headline 5 Pin": pinned_headlines.get("headline_5", ""),
+                    "Headline 6 Pin": pinned_headlines.get("headline_6", ""),
+                    "Headline 7 Pin": pinned_headlines.get("headline_7", ""),
+                    "Headline 8 Pin": pinned_headlines.get("headline_8", ""),
+                    "Headline 9 Pin": pinned_headlines.get("headline_9", ""),
+                    "Description 1": ad_descriptions[0],
+                    "Description 2": ad_descriptions[1],
+                    "Description 3": ad_descriptions[2],
+                    "Description 4": ad_descriptions[3],
+                    "Description 1 Pin": ad.get("pinned_descriptions", {}).get("description_1", ""),
+                    "Description 2 Pin": ad.get("pinned_descriptions", {}).get("description_2", ""),
+                    "Description 3 Pin": ad.get("pinned_descriptions", {}).get("description_3", ""),
+                    "Description 4 Pin": ad.get("pinned_descriptions", {}).get("description_4", ""),
+                    "Final URL": final_url,
+                    "Path 1": ad.get("path_1", ""),
+                    "Path 2": ad.get("path_2", ""),
+                    "Sitelinks": stringify_list(sitelinks),
+                    "Callouts": stringify_list(callouts),
+                    "Structured Snippets": stringify_list(structured_snippets),
+                    "Call Extensions": stringify_list(call_extensions),
+                    "Monthly Searches": "",
+                    "Competition": "",
+                    "Top of page bid (low)": "",
+                    "Top of page bid (high)": "",
+                }
+                rows.append(base_row)
+                for keyword in keywords:
+                    kw_row = base_row.copy()
+                    kw_row.update({
+                        "Ad type": "",
+                        "Criterion Type": "Exact",
                         "Status": "Enabled",
-                        "Keyword": "",
-                        "Keyword Match Type": "",
-                        "Keyword Status": "",
-                        "Headline 1": ad_headlines[0],
-                        "Headline 2": ad_headlines[1],
-                        "Headline 3": ad_headlines[2],
-                        "Headline 4": ad_headlines[3],
-                        "Headline 5": ad_headlines[4],
-                        "Headline 6": ad_headlines[5],
-                        "Headline 7": ad_headlines[6],
-                        "Headline 8": ad_headlines[7],
-                        "Headline 9": ad_headlines[8],
-                        "Headline 1 Pin": pinned_headlines.get("headline_1", ""),
-                        "Headline 2 Pin": pinned_headlines.get("headline_2", ""),
-                        "Headline 3 Pin": pinned_headlines.get("headline_3", ""),
-                        "Headline 4 Pin": pinned_headlines.get("headline_4", ""),
-                        "Headline 5 Pin": pinned_headlines.get("headline_5", ""),
-                        "Headline 6 Pin": pinned_headlines.get("headline_6", ""),
-                        "Headline 7 Pin": pinned_headlines.get("headline_7", ""),
-                        "Headline 8 Pin": pinned_headlines.get("headline_8", ""),
-                        "Headline 9 Pin": pinned_headlines.get("headline_9", ""),
-                        "Description 1": ad_descriptions[0],
-                        "Description 2": ad_descriptions[1],
-                        "Description 3": ad_descriptions[2],
-                        "Description 4": ad_descriptions[3],
-                        "Description 1 Pin": ad.get("pinned_descriptions", {}).get("description_1", ""),
-                        "Description 2 Pin": ad.get("pinned_descriptions", {}).get("description_2", ""),
-                        "Description 3 Pin": ad.get("pinned_descriptions", {}).get("description_3", ""),
-                        "Description 4 Pin": ad.get("pinned_descriptions", {}).get("description_4", ""),
-                        "Final URL": final_url,
-                        "Path 1": ad.get("path_1", ""),
-                        "Path 2": ad.get("path_2", ""),
-                        "Sitelinks": stringify_list(sitelinks),
-                        "Callouts": stringify_list(callouts),
-                        "Structured Snippets": stringify_list(structured_snippets),
-                        "Call Extensions": stringify_list(call_extensions),
-                        "Monthly Searches": "",
-                        "Competition": "",
-                        "Top of page bid (low)": "",
-                        "Top of page bid (high)": "",
-                    }
-                    rows.append(base_row)
-                    for keyword in keywords:
-                        kw_row = base_row.copy()
-                        kw_row.update({
-                            "Ad type": "",
-                            "Criterion Type": "Exact",
-                            "Status": "Enabled",
-                            "Keyword": keyword,
-                            "Keyword Match Type": "Exact",
-                            "Keyword Status": "Enabled",
-                            "Headline 1": "",
-                            "Headline 2": "",
-                            "Headline 3": "",
-                            "Headline 4": "",
-                            "Headline 5": "",
-                            "Headline 6": "",
-                            "Headline 7": "",
-                            "Headline 8": "",
-                            "Headline 9": "",
-                            "Headline 1 Pin": "",
-                            "Headline 2 Pin": "",
-                            "Headline 3 Pin": "",
-                            "Headline 4 Pin": "",
-                            "Headline 5 Pin": "",
-                            "Headline 6 Pin": "",
-                            "Headline 7 Pin": "",
-                            "Headline 8 Pin": "",
-                            "Headline 9 Pin": "",
-                            "Description 1": "",
-                            "Description 2": "",
-                            "Description 3": "",
-                            "Description 4": "",
-                            "Description 1 Pin": "",
-                            "Description 2 Pin": "",
-                            "Description 3 Pin": "",
-                            "Description 4 Pin": "",
-                            "Final URL": "",
-                            "Path 1": "",
-                            "Path 2": "",
-                            "Sitelinks": "",
-                            "Callouts": "",
-                            "Structured Snippets": "",
-                            "Call Extensions": "",
-                            "Monthly Searches": (metrics_map.get(keyword.lower(), {}) or {}).get("monthly", 0),
-                            "Competition": (metrics_map.get(keyword.lower(), {}) or {}).get("competition", ""),
-                            "Top of page bid (low)": (metrics_map.get(keyword.lower(), {}) or {}).get("cpc_low", 0.0),
-                            "Top of page bid (high)": (metrics_map.get(keyword.lower(), {}) or {}).get("cpc_high", 0.0),
-                        })
-                        rows.append(kw_row)
-            if rows:
-                df_ads = pd.DataFrame(rows)
-                csv_buffer = io.BytesIO()
-                df_ads.to_csv(csv_buffer, index=False, sep="\t", encoding="utf-16", lineterminator="\n")
-                csv_buffer.seek(0)
-                st.success("✅ Kampagnestruktur genereret! Download filen nedenfor.")
-                st.download_button(
-                    label="Download CSV til Ads Editor",
-                    data=csv_buffer,
-                    file_name="ads_editor_upload.csv",
-                    mime="text/csv"
-                )
-        except Exception as e:
-            st.error(f"Fejl under AI-kald: {e}")
+                        "Keyword": keyword,
+                        "Keyword Match Type": "Exact",
+                        "Keyword Status": "Enabled",
+                        "Headline 1": "",
+                        "Headline 2": "",
+                        "Headline 3": "",
+                        "Headline 4": "",
+                        "Headline 5": "",
+                        "Headline 6": "",
+                        "Headline 7": "",
+                        "Headline 8": "",
+                        "Headline 9": "",
+                        "Headline 1 Pin": "",
+                        "Headline 2 Pin": "",
+                        "Headline 3 Pin": "",
+                        "Headline 4 Pin": "",
+                        "Headline 5 Pin": "",
+                        "Headline 6 Pin": "",
+                        "Headline 7 Pin": "",
+                        "Headline 8 Pin": "",
+                        "Headline 9 Pin": "",
+                        "Description 1": "",
+                        "Description 2": "",
+                        "Description 3": "",
+                        "Description 4": "",
+                        "Description 1 Pin": "",
+                        "Description 2 Pin": "",
+                        "Description 3 Pin": "",
+                        "Description 4 Pin": "",
+                        "Final URL": "",
+                        "Path 1": "",
+                        "Path 2": "",
+                        "Sitelinks": "",
+                        "Callouts": "",
+                        "Structured Snippets": "",
+                        "Call Extensions": "",
+                        "Monthly Searches": (metrics_map.get(keyword.lower(), {}) or {}).get("monthly", 0),
+                        "Competition": (metrics_map.get(keyword.lower(), {}) or {}).get("competition", ""),
+                        "Top of page bid (low)": (metrics_map.get(keyword.lower(), {}) or {}).get("cpc_low", 0.0),
+                        "Top of page bid (high)": (metrics_map.get(keyword.lower(), {}) or {}).get("cpc_high", 0.0),
+                    })
+                    rows.append(kw_row)
+        if rows:
+            df_ads = pd.DataFrame(rows)
+            csv_buffer = io.BytesIO()
+            df_ads.to_csv(csv_buffer, index=False, sep="\t", encoding="utf-16", lineterminator="\n")
+            csv_buffer.seek(0)
+            st.success("✅ Kampagnestruktur genereret! Download filen nedenfor.")
+            st.download_button(
+                label="Download CSV til Ads Editor",
+                data=csv_buffer,
+                file_name="ads_editor_upload.csv",
+                mime="text/csv"
+            )
+    except Exception as e:
+        st.error(f"Fejl under AI-kald: {e}")
 
 
 
