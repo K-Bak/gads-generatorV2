@@ -764,7 +764,7 @@ Ekstra noter:
             key="approved_keywords_multiselect"
         )
         st.session_state["approved_keywords"] = approved
-        # Tekstfelt og knap til manuel tilføjelse af søgeord (opdateret version)
+        # Tekstfelt og knap til manuel tilføjelse af søgeord
         new_kw = st.text_area("Tilføj manuelt ekstra søgeord (ét pr. linje eller kommasepareret)", key="new_keywords_input")
         if st.button("➕ Tilføj søgeord"):
             extra = []
