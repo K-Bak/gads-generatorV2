@@ -1,16 +1,16 @@
 # Streamlit app & UI
 streamlit==1.39.0
-pandas
-requests
+pandas==2.2.2
+requests==2.31.0
 beautifulsoup4
 lxml
 tldextract
 
 # Google Ads & API
-google-ads
+google-ads==24.1.0
 
 # AI integration
-openai==1.50.2
+openai==1.44.0
 
 # Filhåndtering
 python-docx
