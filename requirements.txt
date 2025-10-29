@@ -1,17 +1,17 @@
 # Streamlit app & UI
-streamlit==1.39.0
-pandas==2.2.2
-requests==2.31.0
+streamlit
+pandas
+requests
 beautifulsoup4
+
+# HTML parsing (optional but safe)
 lxml
-tldextract
 
 # AI integration
-openai==1.44.0
+openai
 
 # Filhåndtering
 python-docx
-openpyxl
 PyPDF2
 
 # Ekstra analyser og værktøjer
