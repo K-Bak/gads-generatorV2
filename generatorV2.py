@@ -9,6 +9,17 @@ import requests
 from bs4 import BeautifulSoup
 import time
 from concurrent.futures import ThreadPoolExecutor
+import os
+
+import socket
+import requests.packages.urllib3.util.connection as urllib3_cn
+
+def force_ipv4():
+    def allowed_gai_family():
+        return socket.AF_INET  # Brug kun IPv4
+    urllib3_cn.allowed_gai_family = allowed_gai_family
+
+force_ipv4()
 
 st.set_page_config(page_title="Google Ads – Kampagne Generator", layout="wide")
 
@@ -125,22 +136,31 @@ def fetch_keyword_metrics(all_keywords, customer_id: str, yaml_path: str = "goog
 
 @st.cache_data(ttl=3600)
 def fetch_semrush_metrics(keywords, api_key=None, database="dk"):
-    # Bruger Generaxion Keyword API endpoint
+    """Henter søgevolumen og CPC fra Generaxion Keyword API."""
     result = {}
     if not keywords:
         return result
+
+    GENX_API_TOKEN = os.getenv("GENX_API_TOKEN")
+    if not GENX_API_TOKEN:
+        st.error("GENX_API_TOKEN mangler")
+        return {}
+
     url = "https://niclasaccess.generaxion.dev/api/seo-analysis/batch-keyword-analysis"
     headers = {
-        "Authorization": "Bearer Vami3KQpV0DUR1S18K4FomlfGgITrCFU",
+        "Authorization": f"Bearer {GENX_API_TOKEN}",
         "Content-Type": "application/json"
     }
+
     try:
         payload = {"keywords": keywords}
         r = requests.post(url, headers=headers, json=payload, timeout=20)
+
         if r.status_code != 200:
-            st.error(f"Generaxion Keyword API fejl: {r.status_code}")
-            st.code(r.text)
-            st.stop()
+            st.error(f"API-kald mislykkedes (status {r.status_code}).")
+            return {kw.lower(): {"monthly": 0, "cpc_dkk": 0.0, "competition": 0.0, "difficulty": 0.0, "trends": []}
+                    for kw in keywords}
+
         data = r.json()
         for item in data:
             kw = item.get("Keyword", "").lower()
@@ -150,13 +170,16 @@ def fetch_semrush_metrics(keywords, api_key=None, database="dk"):
                 "monthly": item.get("Search Volume", 0),
                 "cpc_dkk": round(item.get("CPC", 0.0), 2),
                 "competition": round(item.get("Competition", 0.0), 2),
-                "difficulty": 0.0,  # placeholder for konsistens
+                "difficulty": 0.0,
                 "trends": item.get("Trends", []),
             }
+
         return result
+
     except Exception as e:
-        st.error(f"Fejl ved Generaxion Keyword API: {e}")
-        return {}
+        st.error(f"Fejl ved kald til Generaxion Keyword API: {e}")
+        return {kw.lower(): {"monthly": 0, "cpc_dkk": 0.0, "competition": 0.0, "difficulty": 0.0, "trends": []}
+                for kw in keywords}
 
 
 # Google Ads imports (flyttet ind i fetch_keyword_metrics)
@@ -749,13 +772,33 @@ Ekstra noter:
                 s = s.strip()
                 if s and s not in st.session_state.get("approved_keywords", []):
                     extra.append(s)
+
             if extra:
+                # Tilføj de nye keywords
                 st.session_state["approved_keywords"] = sorted(set(
                     st.session_state.get("approved_keywords", []) + extra
                 ))
-                st.success(f"Tilføjede {len(extra)} nye søgeord.")
-                st.session_state["new_keywords_input"] = ""
-                st.rerun()  # 🔹 Genindlæs for at vise søgeordet i listen og tabellen
+
+                # Nulstil tekstfeltet korrekt uden at ændre session_state direkte
+                st.text_area("Tilføj manuelt ekstra søgeord (ét pr. linje eller kommasepareret)", value="", key="new_keywords_input", placeholder="") 
+
+                # Hent søgevolumen for nye søgeord med det samme
+                data_source = st.session_state.get("sidebar_keyword_source", "SEMrush")
+                gads_customer_id = st.session_state.get("sidebar_gads_customer_id", "")
+                metrics_map = st.session_state.get("metrics_map", {})
+
+                if data_source == "Google Keyword Planner" and gads_customer_id:
+                    updated_metrics = fetch_keyword_metrics(extra, gads_customer_id)
+                else:
+                    updated_metrics = fetch_semrush_metrics(extra, database="dk")
+
+                if updated_metrics:
+                    metrics_map.update(updated_metrics)
+                    st.session_state["metrics_map"] = metrics_map
+
+                st.success(f"Tilføjede {len(extra)} nye søgeord og hentede søgevolumen.")
+                st.rerun()
+
             else:
                 st.info("Ingen nye unikke søgeord fundet.")
         # Mulighed for at fjerne søgeord
@@ -1179,13 +1222,17 @@ Brug kun følgende søgeord (med bekræftet søgevolumen): {', '.join(approved_k
                     rows.append(kw_row)
         if rows:
             df_ads = pd.DataFrame(rows)
-            csv_buffer = io.BytesIO()
-            df_ads.to_csv(csv_buffer, index=False, sep="\t", encoding="utf-16", lineterminator="\n")
-            csv_buffer.seek(0)
+            # Gem CSV i session_state for at undgå genkørsel
+            if "ads_csv" not in st.session_state:
+                csv_buffer = io.BytesIO()
+                df_ads.to_csv(csv_buffer, index=False, sep="\t", encoding="utf-16", lineterminator="\n")
+                csv_buffer.seek(0)
+                st.session_state["ads_csv"] = csv_buffer.getvalue()
+
             st.success("✅ Kampagnestruktur genereret! Download filen nedenfor.")
             st.download_button(
                 label="Download CSV til Ads Editor",
-                data=csv_buffer,
+                data=st.session_state["ads_csv"],
                 file_name="ads_editor_upload.csv",
                 mime="text/csv"
             )

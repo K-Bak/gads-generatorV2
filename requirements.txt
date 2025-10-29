@@ -1,5 +1,5 @@
 # Streamlit app & UI
-streamlit
+streamlit==1.39.0
 pandas
 requests
 beautifulsoup4
@@ -10,11 +10,12 @@ tldextract
 google-ads
 
 # AI integration
-openai>=1.0.0,<2.0.0
+openai==1.50.2
 
 # Filhåndtering
 python-docx
 openpyxl
+PyPDF2
 
 # Ekstra analyser og værktøjer
 regex
