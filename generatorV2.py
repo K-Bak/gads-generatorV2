@@ -15,9 +15,10 @@ import socket
 import requests.packages.urllib3.util.connection as urllib3_cn
 
 def force_ipv4():
-    def allowed_gai_family():
-        return socket.AF_INET  # Brug kun IPv4
-    urllib3_cn.allowed_gai_family = allowed_gai_family
+    if os.getenv("STREAMLIT_RUNTIME") is None:  # kun lokalt
+        def allowed_gai_family():
+            return socket.AF_INET
+        urllib3_cn.allowed_gai_family = allowed_gai_family
 
 force_ipv4()
 
