@@ -6,9 +6,6 @@ beautifulsoup4
 lxml
 tldextract
 
-# Google Ads & API
-google-ads==24.1.0
-
 # AI integration
 openai==1.44.0
 
