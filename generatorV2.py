@@ -146,7 +146,7 @@ def fetch_semrush_metrics(keywords, api_key=None, database="dk"):
         st.error("GENX_API_TOKEN mangler")
         return {}
 
-    url = "https://niclasaccess.generaxion.dev/api/seo-analysis/batch-keyword-analysis"
+    url = "https://access.generaxion.dev/api/seo-analysis/batch-keyword-analysis"
     headers = {
         "Authorization": f"Bearer {GENX_API_TOKEN}",
         "Content-Type": "application/json"
