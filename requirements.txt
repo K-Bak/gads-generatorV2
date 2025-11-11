@@ -13,6 +13,7 @@ openai
 # Filhåndtering
 python-docx
 PyPDF2
+reportlab
 
 # Ekstra analyser og værktøjer
 regex

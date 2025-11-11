@@ -739,18 +739,37 @@ Ekstra noter:
             formatted = "• " + "\n• ".join(lines)
             return formatted
 
-        # --- NY DOWNLOAD-KNAP: Kun analyser (CSV) ---
-        df_analyser = pd.DataFrame([{
-            "Foranalyse": format_analysis_text(st.session_state.get("analysis_text", "")),
-            "Konkurrentanalyse": format_analysis_text(st.session_state.get("competitor_analysis_text", ""))
-        }])
-        csv_buffer = io.StringIO()
-        df_analyser.to_csv(csv_buffer, index=False, sep=";")
+        # --- NY DOWNLOAD-KNAP: Download analyser som PDF ---
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import cm
+        from io import BytesIO
+
+        pdf_buffer = BytesIO()
+
+        styles = getSampleStyleSheet()
+        style_title = styles["Heading1"]
+        style_body = styles["BodyText"]
+
+        doc = SimpleDocTemplate(pdf_buffer, pagesize=A4)
+        story = []
+
+        story.append(Paragraph("Foranalyse", style_title))
+        story.append(Paragraph(format_analysis_text(st.session_state.get("analysis_text", "")), style_body))
+        story.append(Spacer(1, 1*cm))
+
+        story.append(Paragraph("Konkurrentanalyse", style_title))
+        story.append(Paragraph(format_analysis_text(st.session_state.get("competitor_analysis_text", "")), style_body))
+        story.append(Spacer(1, 1*cm))
+
+        doc.build(story)
+
         st.download_button(
-            "💾 Download analyser (CSV)",
-            data=csv_buffer.getvalue(),
-            file_name="analyser.csv",
-            mime="text/csv"
+            "💾 Download analyser (PDF)",
+            data=pdf_buffer.getvalue(),
+            file_name="analyser.pdf",
+            mime="application/pdf"
         )
 
         # Multiselect til valg/fravalg af søgeord (opdateret version)
