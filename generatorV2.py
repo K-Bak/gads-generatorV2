@@ -718,25 +718,25 @@ Ekstra noter:
         df_valid = df_keywords[df_keywords["Månedlige søgninger"] > 0]
         st.subheader("🔑 Søgeord med søgevolumen")
         st.dataframe(df_valid, use_container_width=True)
-        # Download-knap til søgeord med volumen og CPC
-        csv_buffer = io.StringIO()
-        df_valid.to_csv(csv_buffer, index=False, sep=";")
-        st.download_button(
-            "💾 Download søgeord med volumen og CPC",
-            data=csv_buffer.getvalue(),
-            file_name="keywords.csv",
-            mime="text/csv"
-        )
 
         # --- Helper: Format analysis/competitor text for readable output ---
         def format_analysis_text(text):
+            """
+            Konverterer GPT-tekst til lækre punktopstillinger.
+            - Fjerner '- ' og '• -'
+            - Tilføjer bullet points automatisk
+            - Håndterer linjeskift
+            """
             if not text:
                 return ""
-            # Trim spaces and normalize newlines
-            text = text.strip().replace("\r", "")
-            # Replace multiple newlines with bullet formatting
-            lines = [l.strip() for l in text.split("\n") if l.strip()]
-            formatted = "• " + "\n• ".join(lines)
+
+            clean = text.replace("• -", "").replace("- ", "").replace("•", "")
+            lines = [l.strip() for l in clean.split("\n") if l.strip()]
+
+            formatted = ""
+            for line in lines:
+                formatted += f"• {line}<br/>"
+
             return formatted
 
         # --- NY DOWNLOAD-KNAP: Download analyser som PDF ---
@@ -756,12 +756,14 @@ Ekstra noter:
         story = []
 
         story.append(Paragraph("Foranalyse", style_title))
+        story.append(Spacer(1, 0.3*cm))
         story.append(Paragraph(format_analysis_text(st.session_state.get("analysis_text", "")), style_body))
-        story.append(Spacer(1, 1*cm))
+        story.append(Spacer(1, 0.7*cm))
 
         story.append(Paragraph("Konkurrentanalyse", style_title))
+        story.append(Spacer(1, 0.3*cm))
         story.append(Paragraph(format_analysis_text(st.session_state.get("competitor_analysis_text", "")), style_body))
-        story.append(Spacer(1, 1*cm))
+        story.append(Spacer(1, 0.7*cm))
 
         doc.build(story)
 
@@ -769,6 +771,38 @@ Ekstra noter:
             "💾 Download analyser (PDF)",
             data=pdf_buffer.getvalue(),
             file_name="analyser.pdf",
+            mime="application/pdf"
+        )
+
+        # --- Download søgeord som PDF ---
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import cm
+        from io import BytesIO
+
+        kw_pdf = BytesIO()
+        styles = getSampleStyleSheet()
+        style_title = styles["Heading1"]
+        style_body = styles["BodyText"]
+
+        doc_kw = SimpleDocTemplate(kw_pdf, pagesize=A4)
+        story_kw = []
+
+        story_kw.append(Paragraph("Søgeord med søgevolumen", style_title))
+        story_kw.append(Spacer(1, 0.4*cm))
+
+        for _, row in df_valid.iterrows():
+            line = f"<b>{row['Søgeord']}</b> — {row['Månedlige søgninger']} søgninger / {row['CPC (DKK)']} kr."
+            story_kw.append(Paragraph(line, style_body))
+            story_kw.append(Spacer(1, 0.2*cm))
+
+        doc_kw.build(story_kw)
+
+        st.download_button(
+            "💾 Download søgeord (PDF)",
+            data=kw_pdf.getvalue(),
+            file_name="keywords.pdf",
             mime="application/pdf"
         )
 
@@ -942,6 +976,12 @@ def normalize_ad_obj(ad: dict, customer_website: str) -> dict:
 # --- Fase 4: GENERATION ---
 if st.session_state["step"] == "generation":
     st.header("Generér kampagnestruktur")
+    # Prevent re-running OpenAI call after CSV download
+    if st.session_state.get("generation_done"):
+        # Skip AI generation and jump to CSV output section
+        st.info("✅ Kampagnestruktur allerede genereret.")
+    else:
+        st.session_state["run_generation"] = True
     st.info("Kampagnestrukturen bygges på baggrund af de valgte søgeord og analyser.")
     # Kør kampagnestrukturbygning automatisk
     xpect_text = st.session_state["xpect_text"]
@@ -1051,16 +1091,22 @@ Brug kun følgende søgeord (med bekræftet søgevolumen): {', '.join(approved_k
         if not api_key:
             st.error("Indtast din OpenAI API-nøgle i sidebaren for at køre AI-analysen.")
             raise RuntimeError("Missing API key")
-        with st.spinner("🧠 Genererer kampagnestruktur…"):
-            client = OpenAI(api_key=api_key)
-            response = client.chat.completions.create(
-                model="gpt-5",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ]
-            )
-            output_text = response.choices[0].message.content
+        if not st.session_state.get("generation_done"):
+            with st.spinner("🧠 Genererer kampagnestruktur…"):
+                client = OpenAI(api_key=api_key)
+                response = client.chat.completions.create(
+                    model="gpt-5",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ]
+                )
+                output_text = response.choices[0].message.content
+            st.session_state["generation_output"] = output_text
+            st.session_state["generation_done"] = True
+            st.rerun()
+        else:
+            output_text = st.session_state.get("generation_output", "")
         try:
             data = extract_json_from_text(output_text)
         except ValueError as e:
