@@ -196,6 +196,20 @@ def compute_input_hash(xpect_text, customer_website, additional_info, geo_areas,
     }, ensure_ascii=False, sort_keys=True)
     return hashlib.md5(payload.encode("utf-8")).hexdigest()
 
+# --- Progress bar animation helper ---
+def animate_progress(progress_bar, start: int, end: int, duration: float = 1.5):
+    """
+    Animerer en Streamlit progress bar fra 'start' til 'end' over ca. 'duration' sekunder.
+    Bruges som en pseudo-tidsbar (ikke baseret på reel API-responstid).
+    """
+    if end < start:
+        end = start
+    steps = max(end - start, 1)
+    delay = duration / steps
+    for value in range(start, end + 1):
+        progress_bar.progress(min(max(value, 0), 100))
+        time.sleep(delay)
+
 # --- Simple domain extraction (no external deps) ---
 DOMAIN_REGEX = r"[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b"
 
@@ -248,7 +262,7 @@ with st.sidebar:
         ["SEMrush", "Google Keyword Planner"],
         key="sidebar_keyword_source"
     )
-    api_key = st.text_input("Indtast din OpenAI API-nøgle", type="password", key="sidebar_openai_key")
+    api_key = st.secrets["OPENAI_API_KEY"]
     # SEMrush bruger nu Generaxion Keyword API (ingen nøgle nødvendig)
     if keyword_source == "Google Keyword Planner":
         gads_customer_id = st.text_input(
@@ -539,14 +553,18 @@ Samlet dagsbudget:
                         parsed = {}
                 else:
                     parsed = {}
+
             foranalyse = parsed.get("foranalyse", "")
             konkurrenter = parsed.get("konkurrenter", "")
             konkurrentanalyse = parsed.get("konkurrentanalyse", "")
+
+            # Udtræk konkurrentdomæner og gem i session_state
             suggested = extract_domains(konkurrenter)
             if not suggested:
                 suggested = get_external_domains_from_homepage(customer_website, max_domains=5)
             own = urlparse(customer_website).netloc.replace("www.", "").lower()
             suggested = [d for d in suggested if d and d != own]
+
             st.session_state["competitor_input"] = ", ".join(sorted(set(suggested)))
             st.session_state["analysis_text"] = foranalyse
             st.session_state["competitor_analysis_text"] = konkurrentanalyse
@@ -560,46 +578,22 @@ Samlet dagsbudget:
                 total_daily_budget,
             )
             st.session_state["analysis_ready"] = True
-            st.success("✅ Analyse færdig – du kan nu redigere resultaterne herunder.")
+
+            # Spring direkte videre til keyword-step
+            st.session_state["step"] = "keywords"
+            st.success("✅ Analyse færdig – går videre til søgeordsudvælgelse…")
             st.rerun()
+
         except Exception as e:
             st.error(f"Analyse mislykkedes: {e}")
-
     else:
-        # ALTID vis tekstfelter, med data fra session_state (ingen AI-kald)
-        st.subheader("📊 Foranalyse (kan redigeres)")
-        foranalyse_edit = st.text_area(
-            "",
-            value=st.session_state.get("analysis_text", ""),
-            height=800,
-            key="foranalyse_temp"
-        )
+        # Hvis analysen allerede er kørt (fx ved refresh), spring direkte videre til keyword-step
+        st.session_state["step"] = "keywords"
+        st.rerun()
 
-        st.subheader("🔎 Foreslåede konkurrenter")
-        st.write(st.session_state.get("competitor_input", ""))
-
-        st.subheader("🏁 Konkurrentanalyse (kan redigeres)")
-        konkurrence_edit = st.text_area(
-            "",
-            value=st.session_state.get("competitor_analysis_text", ""),
-            height=800,
-            key="konkurrence_temp"
-        )
-
-        # Når man trykker på knappen, gem ændringer og gå videre med lokal spinner
-        placeholder = st.empty()
-        if st.button("➡️ Fortsæt til søgeordsudvælgelse"):
-            placeholder.info("🤖 Genererer søgeordsforslag…")
-            time.sleep(0.5)
-            st.session_state["analysis_text"] = st.session_state["foranalyse_temp"]
-            st.session_state["competitor_analysis_text"] = st.session_state["konkurrence_temp"]
-            st.session_state["step"] = "keywords"
-            st.rerun()
-
-# --- Fase 3: KEYWORDS ---
+ # --- Fase 3: KEYWORDS ---
 if st.session_state["step"] == "keywords":
-    st.header("Søgeord – udvælg og redigér")
-    # Udtræk fra input
+    # Udtræk fra input / analyser
     xpect_text = st.session_state["xpect_text"]
     customer_website = st.session_state["customer_website"]
     additional_info = st.session_state["additional_info"]
@@ -608,7 +602,12 @@ if st.session_state["step"] == "keywords":
     scraped_info = st.session_state["scraped_info"]
     total_daily_budget = st.session_state["total_daily_budget"]
 
-    # --- GPT-baseret keyword forslag (forbedret prompt med niveauer, opdateret outputformat uden søgevolumen) ---
+    # Hvis vi allerede har genereret søgeord én gang, så spring bare videre
+    if st.session_state.get("keywords_ready"):
+        st.session_state["step"] = "generation"
+        st.rerun()
+
+    # --- GPT-baseret keyword forslag (ingen UI, kun backend) ---
     keyword_prompt = f"""
 Du er en erfaren dansk Google Ads-specialist. Udarbejd en komplet liste over **40–60 danske søgeord** til Google Search, opdelt i fire niveauer:
 
@@ -641,10 +640,12 @@ Ekstra noter:
 {st.session_state['additional_info']}
 """
 
+    st.info("🤖 Genererer søgeordsforslag og søgedata…")
+
+    # 1) Generér rå søgeord fra GPT (kun første gang)
     if "keywords_generated" in st.session_state:
         keywords_raw = st.session_state["keywords_generated"]
     else:
-        st.info("🤖 Genererer søgeordsforslag…")
         client = OpenAI(api_key=api_key)
         response = client.chat.completions.create(
             model="gpt-5",
@@ -659,238 +660,137 @@ Ekstra noter:
             keywords_raw = ""
         st.session_state["keywords_generated"] = keywords_raw
 
-    # Rens og normalisér listen
+    # 2) Rens og normalisér listen
     gpt_keywords = [k.strip().lower() for k in keywords_raw.split("\n") if len(k.strip()) > 2]
     gpt_keywords = [k for k in gpt_keywords if not re.search(r"[^a-zæøå0-9\s\-\.;]", k)]
     gpt_keywords = [k for k in gpt_keywords if not any(word in k for word in ["analyse", "tone", "call-to-action", "primære", "usp", "målgruppe"])]
 
-    # Udtræk kun søgeordet fra evt. niveau/volumen-format
-    def extract_kw(line):
-        # Forventet format: "<niveau>; <søgeord>; <volumen>"
+    def extract_kw(line: str) -> str:
+        """Udtræk kun søgeordet fra evt. niveau/volumen-format: '<niveau>; <søgeord>; <volumen>'."""
         parts = [p.strip() for p in line.split(";")]
         if len(parts) >= 2:
             return parts[1]
         return line
+
     gpt_keywords = [extract_kw(k) for k in gpt_keywords if extract_kw(k)]
-    # Fjern for lange/fragmenterede
     gpt_keywords = [k for k in gpt_keywords if 2 < len(k) <= 40 and len(k.split()) <= 5 and not k.startswith('-')]
     potential_keywords = sorted(set(gpt_keywords))
 
-    st.subheader("📋 Foreslåede søgeord (før filtrering)")
-    st.dataframe(pd.DataFrame({"Søgeord": potential_keywords}), use_container_width=True)
+    # 3) Hent søgevolumen / CPC i baggrunden
+    metrics_map = {}
+    if potential_keywords:
+        if data_source == "Google Keyword Planner" and gads_customer_id:
+            metrics_map = fetch_keyword_metrics(potential_keywords, gads_customer_id)
+        elif data_source == "SEMrush":
+            st.info("🔹 Henter søgedata fra Generaxion Keyword API…")
+            metrics_map = fetch_semrush_metrics(potential_keywords, database="dk")
 
-    with st.spinner("🔍 Henter søgeord..."):
-        metrics_map = {}
-        if potential_keywords:
-            if data_source == "Google Keyword Planner" and gads_customer_id:
-                metrics_map = fetch_keyword_metrics(potential_keywords, gads_customer_id)
-            elif data_source == "SEMrush":
-                st.info("🔹 Henter søgedata fra Generaxion Keyword API…")
-                metrics_map = fetch_semrush_metrics(potential_keywords, database="dk")
-        def get_fallback_keywords(potential_keywords, metrics_map, min_count=10):
-            valid = [k for k in potential_keywords if metrics_map.get(k.lower(), {}).get("monthly", 0) > 0]
-            if len(valid) >= min_count:
-                return valid
-            extras = [k for k in potential_keywords if k not in valid]
-            return valid + extras[:max(0, min_count - len(valid))]
-        valid_keywords = get_fallback_keywords(potential_keywords, metrics_map, min_count=10)
-        table_rows = []
-        for k in valid_keywords:
-            m = metrics_map.get(k.lower(), {})
-            if data_source == "Google Keyword Planner":
-                monthly = m.get("monthly", 0)
-                cpc = m.get("cpc_low", 0.0)
-                comp = m.get("competition", "")
-                source = "Google"
-            else:
-                monthly = m.get("monthly", 0)
-                cpc = m.get("cpc_dkk", 0.0)
-                comp = m.get("competition", "")
-                source = "SEMrush"
-            table_rows.append({
-                "Søgeord": k,
-                "Månedlige søgninger": monthly,
-                "CPC (DKK)": cpc,
-                "Konkurrence": comp,
-                "Datakilde": source,
-            })
-        df_keywords = pd.DataFrame(table_rows)
-        df_valid = df_keywords[df_keywords["Månedlige søgninger"] > 0]
-        st.subheader("🔑 Søgeord med søgevolumen")
-        st.dataframe(df_valid, use_container_width=True)
+    def get_fallback_keywords(potential_keywords, metrics_map, min_count=10):
+        valid = [k for k in potential_keywords if metrics_map.get(k.lower(), {}).get("monthly", 0) > 0]
+        if len(valid) >= min_count:
+            return valid
+        extras = [k for k in potential_keywords if k not in valid]
+        return valid + extras[:max(0, min_count - len(valid))]
 
-        # --- Helper: Format analysis/competitor text for readable output ---
-        def format_analysis_text(text):
-            """
-            Konverterer GPT-tekst til lækre punktopstillinger.
-            - Fjerner '- ' og '• -'
-            - Tilføjer bullet points automatisk
-            - Håndterer linjeskift
-            """
-            if not text:
-                return ""
+    valid_keywords = get_fallback_keywords(potential_keywords, metrics_map, min_count=10)
 
-            clean = text.replace("• -", "").replace("- ", "").replace("•", "")
-            lines = [l.strip() for l in clean.split("\n") if l.strip()]
+    # 4) Byg datatabel til senere brug (fx PDF / oversigt på sidste side)
+    table_rows = []
+    for k in valid_keywords:
+        m = metrics_map.get(k.lower(), {})
+        if data_source == "Google Keyword Planner":
+            monthly = m.get("monthly", 0)
+            cpc = m.get("cpc_low", 0.0)
+            comp = m.get("competition", "")
+            source = "Google"
+        else:
+            monthly = m.get("monthly", 0)
+            cpc = m.get("cpc_dkk", 0.0)
+            comp = m.get("competition", "")
+            source = "SEMrush"
+        table_rows.append({
+            "Søgeord": k,
+            "Månedlige søgninger": monthly,
+            "CPC (DKK)": cpc,
+            "Konkurrence": comp,
+            "Datakilde": source,
+        })
 
-            formatted = ""
-            for line in lines:
-                formatted += f"• {line}<br/>"
+    df_keywords = pd.DataFrame(table_rows)
+    df_valid = df_keywords[df_keywords["Månedlige søgninger"] > 0]
 
-            return formatted
+    # 5) Vælg automatisk godkendte søgeord
+    if not df_valid.empty:
+        approved = df_valid["Søgeord"].tolist()
+    else:
+        # fallback: brug valid_keywords selvom volumen=0, så vi altid har noget
+        approved = valid_keywords or potential_keywords
 
-        # --- NY DOWNLOAD-KNAP: Download analyser som PDF ---
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-        from reportlab.lib.styles import getSampleStyleSheet
-        from reportlab.lib.pagesizes import A4
-        from reportlab.lib.units import cm
-        from io import BytesIO
+    st.session_state["approved_keywords"] = approved
+    st.session_state["metrics_map"] = metrics_map
+    st.session_state["df_valid_keywords"] = df_valid
 
-        pdf_buffer = BytesIO()
+    # 6) Byg PDF-filer til download (analyse + keywords) og gem bytes i session_state
 
-        styles = getSampleStyleSheet()
-        style_title = styles["Heading1"]
-        style_body = styles["BodyText"]
+    def format_analysis_text(text: str) -> str:
+        """
+        Konverterer GPT-tekst til lækre punktopstillinger.
+        - Fjerner '- ' og '• -'
+        - Tilføjer bullet points automatisk
+        - Håndterer linjeskift
+        """
+        if not text:
+            return ""
+        clean = text.replace("• -", "").replace("- ", "").replace("•", "")
+        lines = [l.strip() for l in clean.split("\n") if l.strip()]
+        formatted = ""
+        for line in lines:
+            formatted += f"• {line}<br/>"
+        return formatted
 
-        doc = SimpleDocTemplate(pdf_buffer, pagesize=A4)
-        story = []
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import cm
+    from io import BytesIO
 
-        story.append(Paragraph("Foranalyse", style_title))
-        story.append(Spacer(1, 0.3*cm))
-        story.append(Paragraph(format_analysis_text(st.session_state.get("analysis_text", "")), style_body))
-        story.append(Spacer(1, 0.7*cm))
+    styles = getSampleStyleSheet()
+    style_title = styles["Heading1"]
+    style_body = styles["BodyText"]
 
-        story.append(Paragraph("Konkurrentanalyse", style_title))
-        story.append(Spacer(1, 0.3*cm))
-        story.append(Paragraph(format_analysis_text(st.session_state.get("competitor_analysis_text", "")), style_body))
-        story.append(Spacer(1, 0.7*cm))
+    # Analyse-PDF
+    pdf_buffer = BytesIO()
+    doc = SimpleDocTemplate(pdf_buffer, pagesize=A4)
+    story = []
+    story.append(Paragraph("Foranalyse", style_title))
+    story.append(Spacer(1, 0.3 * cm))
+    story.append(Paragraph(format_analysis_text(st.session_state.get("analysis_text", "")), style_body))
+    story.append(Spacer(1, 0.7 * cm))
+    story.append(Paragraph("Konkurrentanalyse", style_title))
+    story.append(Spacer(1, 0.3 * cm))
+    story.append(Paragraph(format_analysis_text(st.session_state.get("competitor_analysis_text", "")), style_body))
+    story.append(Spacer(1, 0.7 * cm))
+    doc.build(story)
+    st.session_state["analysis_pdf"] = pdf_buffer.getvalue()
 
-        doc.build(story)
+    # Keyword-PDF
+    kw_pdf = BytesIO()
+    doc_kw = SimpleDocTemplate(kw_pdf, pagesize=A4)
+    story_kw = []
+    story_kw.append(Paragraph("Søgeord med søgevolumen", style_title))
+    story_kw.append(Spacer(1, 0.4 * cm))
+    for _, row in df_valid.iterrows():
+        line = f"<b>{row['Søgeord']}</b> — {row['Månedlige søgninger']} søgninger / {row['CPC (DKK)']} kr."
+        story_kw.append(Paragraph(line, style_body))
+        story_kw.append(Spacer(1, 0.2 * cm))
+    doc_kw.build(story_kw)
+    st.session_state["keywords_pdf"] = kw_pdf.getvalue()
 
-        st.download_button(
-            "💾 Download analyser (PDF)",
-            data=pdf_buffer.getvalue(),
-            file_name="analyser.pdf",
-            mime="application/pdf"
-        )
-
-        # --- Download søgeord som PDF ---
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-        from reportlab.lib.styles import getSampleStyleSheet
-        from reportlab.lib.pagesizes import A4
-        from reportlab.lib.units import cm
-        from io import BytesIO
-
-        kw_pdf = BytesIO()
-        styles = getSampleStyleSheet()
-        style_title = styles["Heading1"]
-        style_body = styles["BodyText"]
-
-        doc_kw = SimpleDocTemplate(kw_pdf, pagesize=A4)
-        story_kw = []
-
-        story_kw.append(Paragraph("Søgeord med søgevolumen", style_title))
-        story_kw.append(Spacer(1, 0.4*cm))
-
-        for _, row in df_valid.iterrows():
-            line = f"<b>{row['Søgeord']}</b> — {row['Månedlige søgninger']} søgninger / {row['CPC (DKK)']} kr."
-            story_kw.append(Paragraph(line, style_body))
-            story_kw.append(Spacer(1, 0.2*cm))
-
-        doc_kw.build(story_kw)
-
-        st.download_button(
-            "💾 Download søgeord (PDF)",
-            data=kw_pdf.getvalue(),
-            file_name="keywords.pdf",
-            mime="application/pdf"
-        )
-
-        # Multiselect til valg/fravalg af søgeord (opdateret version)
-        all_kw_display = sorted(set(
-            st.session_state.get("approved_keywords", []) + df_valid["Søgeord"].tolist()
-        ))
-        approved = st.multiselect(
-            "Vælg de søgeord du ønsker at inkludere",
-            options=all_kw_display,
-            default=st.session_state.get("approved_keywords", df_valid["Søgeord"].tolist()),
-            key="approved_keywords_multiselect"
-        )
-        st.session_state["approved_keywords"] = approved
-        # Tekstfelt og knap til manuel tilføjelse af søgeord
-        new_kw = st.text_area("Tilføj manuelt ekstra søgeord (ét pr. linje eller kommasepareret)", key="new_keywords_input")
-        if st.button("➕ Tilføj søgeord"):
-            extra = []
-            for s in re.split(r"[,;\n]", new_kw):
-                s = s.strip()
-                if s and s not in st.session_state.get("approved_keywords", []):
-                    extra.append(s)
-
-            if extra:
-                # Tilføj de nye keywords
-                st.session_state["approved_keywords"] = sorted(set(
-                    st.session_state.get("approved_keywords", []) + extra
-                ))
-
-                # Nulstil tekstfeltet korrekt uden at ændre session_state direkte
-                st.text_area("Tilføj manuelt ekstra søgeord (ét pr. linje eller kommasepareret)", value="", key="new_keywords_input", placeholder="") 
-
-                # Hent søgevolumen for nye søgeord med det samme
-                data_source = st.session_state.get("sidebar_keyword_source", "SEMrush")
-                gads_customer_id = st.session_state.get("sidebar_gads_customer_id", "")
-                metrics_map = st.session_state.get("metrics_map", {})
-
-                if data_source == "Google Keyword Planner" and gads_customer_id:
-                    updated_metrics = fetch_keyword_metrics(extra, gads_customer_id)
-                else:
-                    updated_metrics = fetch_semrush_metrics(extra, database="dk")
-
-                if updated_metrics:
-                    metrics_map.update(updated_metrics)
-                    st.session_state["metrics_map"] = metrics_map
-
-                st.success(f"Tilføjede {len(extra)} nye søgeord og hentede søgevolumen.")
-                st.rerun()
-
-            else:
-                st.info("Ingen nye unikke søgeord fundet.")
-        # Mulighed for at fjerne søgeord
-        if st.button("🔁 Opdater søgevolumen for valgte søgeord"):
-            keywords_to_update = st.session_state.get("approved_keywords", [])
-            if not keywords_to_update:
-                st.warning("Ingen valgte søgeord.")
-            else:
-                with st.spinner("🔍 Henter søgevolumen for valgte søgeord..."):
-                    updated_metrics = {}
-                    # Hent kun søgeord der ikke allerede findes i metrics_map
-                    new_keywords = [k for k in keywords_to_update if k.lower() not in metrics_map]
-                    if not new_keywords:
-                        st.info("Alle valgte søgeord har allerede data — ingen opdatering nødvendig.")
-                        updated_metrics = {}
-                    else:
-                        if data_source == "Google Keyword Planner" and gads_customer_id:
-                            updated_metrics = fetch_keyword_metrics(new_keywords, gads_customer_id)
-                        elif data_source == "SEMrush":
-                            updated_metrics = fetch_semrush_metrics(new_keywords, database="dk")
-
-                    if updated_metrics:
-                        metrics_map.update(updated_metrics)
-                        st.session_state["metrics_map"] = metrics_map
-                        st.success(f"Søgevolumen opdateret for {len(updated_metrics)} søgeord.")
-                        st.rerun()
-                    elif not new_keywords:
-                        # Ingen nye søgeord at opdatere, info allerede vist ovenfor
-                        pass
-                    else:
-                        st.warning("Ingen data returneret fra API’et – tjek forbindelsen eller søgeordene.")
-        # Gem metrics_map i session_state til næste fase
-        st.session_state["metrics_map"] = metrics_map
-        # Knap til at godkende søgeord og gå videre (starter nu kampagnegenerering automatisk)
-        if st.button("✅ Godkend søgeord"):
-            st.session_state["step"] = "generation"
-            st.query_params["step"] = "generation"
-            st.success("✅ Søgeord godkendt – kampagnestruktur genereres automatisk...")
-            st.rerun()
+    # Markér som færdig og hop videre
+    st.session_state["keywords_ready"] = True
+    st.success("✅ Søgeord genereret og godkendt automatisk – fortsætter til kampagnestruktur…")
+    st.session_state["step"] = "generation"
+    st.rerun()
 
 
 def extract_json_from_text(text: str):
@@ -1091,8 +991,14 @@ Brug kun følgende søgeord (med bekræftet søgevolumen): {', '.join(approved_k
         if not api_key:
             st.error("Indtast din OpenAI API-nøgle i sidebaren for at køre AI-analysen.")
             raise RuntimeError("Missing API key")
+
         if not st.session_state.get("generation_done"):
+            # Opret en pseudo-tidsbar til kampagnegenereringen
+            progress_bar = st.progress(0)
+            progress_bar.progress(5)
+
             with st.spinner("🧠 Genererer kampagnestruktur…"):
+                # Her kører det tunge AI-kald (bar står typisk stille omkring 5 % imens)
                 client = OpenAI(api_key=api_key)
                 response = client.chat.completions.create(
                     model="gpt-5",
@@ -1102,8 +1008,15 @@ Brug kun følgende søgeord (med bekræftet søgevolumen): {', '.join(approved_k
                     ]
                 )
                 output_text = response.choices[0].message.content
+
+            # Når svaret er klar, lader vi baren bevæge sig langsomt frem mod ~90 %
+            animate_progress(progress_bar, start=5, end=90, duration=1.8)
+
             st.session_state["generation_output"] = output_text
             st.session_state["generation_done"] = True
+
+            # Afslut med 100 % før vi rerunner til visning af download-knapperne
+            progress_bar.progress(100)
             st.rerun()
         else:
             output_text = st.session_state.get("generation_output", "")
@@ -1301,6 +1214,26 @@ Brug kun følgende søgeord (med bekræftet søgevolumen): {', '.join(approved_k
                 file_name="ads_editor_upload.csv",
                 mime="text/csv"
             )
+
+            # 👇 TILFØJ DET HER
+            analysis_pdf = st.session_state.get("analysis_pdf")
+            keywords_pdf = st.session_state.get("keywords_pdf")
+
+            if analysis_pdf:
+                st.download_button(
+                    "💾 Download analyser (PDF)",
+                    data=analysis_pdf,
+                    file_name="analyser.pdf",
+                    mime="application/pdf"
+                )
+
+            if keywords_pdf:
+                st.download_button(
+                    "💾 Download søgeord (PDF)",
+                    data=keywords_pdf,
+                    file_name="keywords.pdf",
+                    mime="application/pdf"
+                )
     except Exception as e:
         st.error(f"Fejl under AI-kald: {e}")
 
