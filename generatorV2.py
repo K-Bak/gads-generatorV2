@@ -21,7 +21,24 @@ def force_ipv4():
 
 force_ipv4()
 
+# Denne skal ALTID være den første Streamlit kommando
 st.set_page_config(page_title="Google Ads – Kampagne Generator", layout="wide")
+
+# ---------------------------------------------------------
+# --- SIKKERHEDSTJEK (START) ---
+# ---------------------------------------------------------
+# Vi tjekker om URL'en indeholder vores hemmelige nøgle
+query_params = st.query_params  # Henter parametre fra URL'en
+
+# Hvis nøglen mangler eller er forkert, stop appen
+if query_params.get("access") != "GeneraxionKey":
+    st.error("⛔ Adgang nægtet.")
+    st.info("Denne app kan kun tilgås gennem Generaxions interne systemer.")
+    st.stop() # Stopper koden her, så resten ikke vises
+# ---------------------------------------------------------
+# --- SIKKERHEDSTJEK (SLUT) ---
+# ---------------------------------------------------------
+
 
 # --- Robust HTTP GET with retries and longer timeout ---
 @st.cache_data(ttl=3600)
