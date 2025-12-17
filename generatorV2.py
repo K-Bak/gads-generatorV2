@@ -24,6 +24,18 @@ force_ipv4()
 # Denne skal ALTID være den første Streamlit kommando
 st.set_page_config(page_title="Google Ads – Kampagne Generator", layout="wide")
 
+st.markdown(
+    """
+    <style>
+        /* Skjul hele sidebaren */
+        [data-testid="stSidebar"] {
+            display: none;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 # ---------------------------------------------------------
 # --- SIKKERHEDSTJEK (START) ---
 # ---------------------------------------------------------
@@ -273,7 +285,7 @@ st.title("Google Ads – Kampagne Generator")
 
 # --- Sidebar: Model- og keyword-kildevalg (ALTID synlig) ---
 with st.sidebar:
-    model_choice = st.selectbox("Vælg GPT-model", ["gpt-5", "gpt-4o"], key="sidebar_model_choice")
+    model_choice = st.selectbox("Vælg GPT-model", ["gpt-5.2", "gpt-4o"], key="sidebar_model_choice")
     keyword_source = st.selectbox(
         "Vælg keyword-kilde",
         ["SEMrush", "Google Keyword Planner"],
@@ -514,6 +526,7 @@ Baseret på nedenstående input (Xpect, website, website-indhold, ekstra noter, 
 Særlige retningslinjer:
 - Hvis noget er ukendt, skriv “Ukendt” eller “Antagelse: …” direkte under relevante punkter.
 - “Potentielle annoncevinkler” skal være konkrete og Google Ads-specifikke, fokusér på benefits, pains og proof.
+- Følgende tegn må aldrig fremgå i resultaterne:  ###.
 
 - Konkurrentforslag:
   - Identificér de 2–5 vigtigste konkurrenter i Danmark ud fra Xpect og websitet.  
@@ -566,7 +579,7 @@ Samlet dagsbudget:
 {total_daily_budget} kr.
 """
             response = client.chat.completions.create(
-                model="gpt-5",
+                model="gpt-5.2",
                 messages=[
                     {"role": "system", "content": "Du er en erfaren Google Ads strateg, der laver foranalyse og konkurrentanalyse før kampagnestruktur."},
                     {"role": "user", "content": combined_analysis_prompt}
@@ -704,7 +717,7 @@ Ekstra noter:
     else:
         client = OpenAI(api_key=api_key)
         response = client.chat.completions.create(
-            model="gpt-5",
+            model="gpt-5.2",
             messages=[
                 {"role": "system", "content": "Du er en Google Ads-specialist, der laver keyword research på dansk."},
                 {"role": "user", "content": keyword_prompt}
@@ -1057,7 +1070,7 @@ Brug kun følgende søgeord (med bekræftet søgevolumen): {', '.join(approved_k
                 # Her kører det tunge AI-kald (bar står typisk stille omkring 5 % imens)
                 client = OpenAI(api_key=api_key)
                 response = client.chat.completions.create(
-                    model="gpt-5",
+                    model="gpt-5.2",
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt}
@@ -1309,7 +1322,7 @@ def headline_cleanup(texts, api_key, model_choice, max_len=30, label="overskrift
     try:
         client = OpenAI(api_key=api_key)
         resp = client.chat.completions.create(
-            model="gpt-5",
+            model="gpt-5.2",
             messages=[
                 {"role": "system", "content": "Du er en dansk tekstforfatter for Google Ads. Du skriver fængende, men korte sætninger."},
                 {"role": "user", "content": prompt}
