@@ -499,17 +499,31 @@ if st.session_state["step"] == "analysis":
         st.info("🧠 Analyserer data…")
         try:
             client = OpenAI(api_key=api_key)
-            combined_analysis_prompt = f"""Du er en erfaren Google Ads strateg.
+            combined_analysis_prompt = f"""Du er en erfaren Google Ads-strateg. Svar altid kort, præcist og på dansk. Brug KUN de angivne inputfelter: Xpect, website, website-indhold, ekstra noter, geografiske områder, ønskede kampagnetyper og budget. Hvis nødvendige oplysninger mangler, skriv “Ukendt” eller “Antagelse: …” direkte under de relevante punkter – opfind ikke data.
+
 Baseret på nedenstående input (Xpect, website, website-indhold, ekstra noter, geografiske områder, ønskede kampagnetyper og budget), skal du udføre en samlet analyse bestående af:
 
-1. **Foranalyse**:
-   - Primære budskaber og value proposition
-   - Målgruppe(r)
-   - USP’er
-   - Tone of voice
-   - Call-to-actions
-   - Potentielle annoncevinkler
-   Skriv kort på dansk i punktform.
+- Foranalyse (skriv kort på dansk i punktform under hver af følgende underpunkter, 3–6 bullets pr. underpunkt):  
+  - Primære budskaber og value proposition  
+  - Målgruppe(r)  
+  - USP’er  
+  - Tone of voice  
+  - Call-to-actions  
+  - Potentielle annoncevinkler (konkrete Google Ads-vinkler som RSA-headlines og description-ideer med fokus på benefits, pains og proof)
+
+Særlige retningslinjer:
+- Hvis noget er ukendt, skriv “Ukendt” eller “Antagelse: …” direkte under relevante punkter.
+- “Potentielle annoncevinkler” skal være konkrete og Google Ads-specifikke, fokusér på benefits, pains og proof.
+
+- Konkurrentforslag:
+  - Identificér de 2–5 vigtigste konkurrenter i Danmark ud fra Xpect og websitet.  
+  - Returnér KUN en kommasepareret liste over roddomæner (uden http/https, uden www, og uden understier eller trailing slash).  
+  - Medtag kun direkte konkurrenter.  
+  - Sortér efter relevans (mest relevante først).
+
+- Konkurrentanalyse:
+  - For hver nævnt konkurrent: Skriv kort på dansk i punktform om deres primære budskaber, USP’er, CTA’er, tone og stil, samt eventuelle gaps.
+  - Afslut analysen med 3–5 forslag til hvordan virksomheden kan differentiere sig fra konkurrenterne (konkrete, anvendelige budskaber/greb til Google Ads og landingssider).
 
 2. **Konkurrentforslag**:
    - Find de 2–5 vigtigste konkurrenter i Danmark for virksomheden ud fra Xpect og websitet.
@@ -626,22 +640,47 @@ if st.session_state["step"] == "keywords":
 
     # --- GPT-baseret keyword forslag (ingen UI, kun backend) ---
     keyword_prompt = f"""
-Du er en erfaren dansk Google Ads-specialist. Udarbejd en komplet liste over **40–60 danske søgeord** til Google Search, opdelt i fire niveauer:
+Du er en erfaren dansk Google Ads-specialist. Udarbejd en komplet liste over 40–60 danske søgeord til Google Search på det danske marked ud fra den angivne virksomhed, branche eller produkt/ydelse.
 
-1. **Bredde søgeord** (generelle, overordnede termer for branchen/produktet)
-2. **Produkt- og tjenesteniveau** (konkrete produkter, varianter, services, mærker)
-3. **Købsintention** (søgeord hvor brugeren har tydelig købs- eller kontaktintention, fx 'køb', 'pris', 'bestil', 'tilbud', 'butik', 'leverandør', 'engros', 'b2b', 'grossist')
-4. **Lokale varianter** (samme søgeord med tilføjede geografi/område – fx bynavne, regioner, landsdele)
+SÅDAN GØR DU:
+- Fordel søgeordene på fire niveauer, og følg præcis dette format:
+  - Niveau-etiketter: **Bred; Produkt; Købsintention; Lokal**
+  - Format: Én søgeordsvariant per linje, med niveau først, semikolon, og søgeordet — fx:  
+    bred; spegepølser  
+    produkt; stikkelsbærsaft  
+    købsintention; køb gavekurv  
+    lokal; delikatesser aalborg  
+- ÉN variant pr. linje, intet punktum, komma eller andre ekstra tegn.
+- Skriv alt med små bogstaver.
 
-**Outputformat:**
-Returnér kun en ren liste, hvor hver linje har formatet:
-<niveau>; <søgeord>
+REGLER OG KRAV:
+- Brug kun realistiske danske søgeord med korrekte diakritiske tegn (æ, ø, å), og mest almindelig stavemåde.
+- Undgå dubletter, lange sætninger/long-tails (>3–4 ord), nichetermer, og ukendte modelnumre.
+- Inkludér relevante synonymer og naturlige ental/flertal uden at skabe dubletter.
+- Fordel 40–60 søgeord relativt jævnt: ca. 10–15 pr. niveau.
+- Udelad informationssøgende termer (test, guide, bedste, inspiration) medmindre bredt relevante for køb.
+- Brug B2B-termer (engros, leverandør, grossist, b2b) KUN hvis branchen er tydeligt B2B.
+- Lokale varianter: Kombinér de vigtigste basis-søgeord med geografiske steder som byer (københavn, aarhus, odense, aalborg, esbjerg, randers, kolding, vejle, horsens, roskilde, silkeborg) og regioner/landsdele (sjælland, fyn, jylland, nordsjælland, hovedstaden, nordjylland, midtjylland, sydjylland, syddanmark) samt evt. “i nærheden”, hvis relevant.
 
-Eksempel:
-Bred; spegepølser
-Produkt; stikkelsbærsaft
-Købsintention; køb gavekurv
-Lokal; delikatesser aalborg
+STRUKTUR:
+- Præsenter UDELUKKENDE listen, INGEN forklaringer, ingen punktopstilling.
+- SVARET SKAL VÆRE EN REN, UFORKLARET LISTE:  
+  <niveau>; <søgeord>  
+  (eksempel: bred; spegepølser)
+
+**Eksempel (kort version):**
+bred; spegepølser  
+produkt; stikkelsbærsaft  
+købsintention; køb gavekurv  
+lokal; delikatesser aalborg  
+(realistiske eksempler skal være meget længere, ca. 10–15 pr. niveau, til sammen 40–60 linjer)
+
+**VIGTIGT:**  
+- Udgå ikke punktform eller ekstra forklaring.
+- Udeluk ikke relevante mærker, men medtag kun udbredte mærker hvis naturligt for produktet/ydelsen.
+
+**OUTPUT:**  
+Returnér KUN den færdige søgeordsliste i beskrevne format. Én variant pr. linje, uden ekstra tegn eller forklaring.
 
 Brug kun **relevante og realistiske** søgeord, som danske brugere faktisk ville søge efter. Undgå irrelevante long-tails eller tekniske vendinger, og varier bredde og detaljeringsgrad.
 
