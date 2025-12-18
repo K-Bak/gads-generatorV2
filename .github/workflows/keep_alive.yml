@@ -1,0 +1,20 @@
+name: Hold Streamlit Vågen
+
+on:
+  schedule:
+    # Kør hver time (kl. 8:00, 9:00 osv.)
+    - cron: "0 * * * *"
+  workflow_dispatch: # Gør at du kan køre den manuelt hvis du vil
+
+jobs:
+  ping_app:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping App URL
+        run: |
+          # Udskift URL'erne herunder med dine egne
+          curl -I https://gads-generator.streamlit.app/
+          curl -I https://seo-analyser.streamlit.app/
+          curl -I https://social-strategy.streamlit.app/
+          curl -I https://social-analyse.streamlit.app/
+          # Tilføj din nye app herunder
